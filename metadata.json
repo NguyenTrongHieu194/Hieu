@@ -1,0 +1,8 @@
+{
+  "name": "Quản Lý Năng Suất Chuyền May",
+  "description": "Ứng dụng quản lý năng suất chuyền may, theo dõi công nhân, công đoạn và tiến độ sản xuất thời gian thực.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
