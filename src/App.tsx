@@ -177,64 +177,94 @@ export default function App() {
     setWorkers(workers.filter(w => w.id !== id));
   };
 
+  const compressImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const MAX_SIZE = 1200;
+
+          if (width > height) {
+            if (width > MAX_SIZE) {
+              height *= MAX_SIZE / width;
+              width = MAX_SIZE;
+            }
+          } else {
+            if (height > MAX_SIZE) {
+              width *= MAX_SIZE / height;
+              height = MAX_SIZE;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          ctx?.drawImage(img, 0, 0, width, height);
+          
+          // Quality 0.7 for good balance between size and OCR quality
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.7);
+          const base64 = dataUrl.split(',')[1];
+          resolve(base64);
+        };
+        img.onerror = reject;
+      };
+      reader.onerror = reject;
+    });
+  };
+
   const handleWorkerFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
 
     setIsExtractingWorker(true);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const result = e.target?.result;
-      if (!result || typeof result !== 'string') {
-        setIsExtractingWorker(false);
-        return;
+    try {
+      const base64 = await compressImage(file);
+      const response = await fetch('/api/extract-worker', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, mimeType: 'image/jpeg' })
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to extract worker data');
       }
       
-      const base64 = result.includes(',') ? result.split(',')[1] : result;
-      try {
-        const response = await fetch('/api/extract-worker', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64, mimeType: file.type })
-        });
+      if (Array.isArray(data) && data.length > 0) {
+        const detectedLines = data.map((item: any) => (item.line || newWorker.line || 'Chuyền 1').trim());
+        const uniqueNewLines = Array.from(new Set(detectedLines)).filter(l => !lines.includes(l));
         
-        const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to extract worker data');
+        if (uniqueNewLines.length > 0) {
+          setLines([...lines, ...uniqueNewLines]);
         }
-        
-        if (Array.isArray(data) && data.length > 0) {
-          // Identify all line names needed (both from AI and current manual entry)
-          const detectedLines = data.map((item: any) => (item.line || newWorker.line || 'Chuyền 1').trim());
-          const uniqueNewLines = Array.from(new Set(detectedLines)).filter(l => !lines.includes(l));
-          
-          if (uniqueNewLines.length > 0) {
-            setLines([...lines, ...uniqueNewLines]);
-          }
 
-          const newWorkers = data.map((item: any) => ({
-            id: `w-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: item.name || 'Unhamed Worker',
-            code: item.code || 'CODE',
-            skills: item.skills ? (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : item.skills) : [],
-            line: (item.line || newWorker.line || 'Chuyền 1').trim(),
-            performance: 0
-          }));
-          setWorkers([...workers, ...newWorkers]);
-          alert(`Đã nhận diện và thêm ${newWorkers.length} công nhân thành công!`);
-        } else {
-          alert('Không tìm thấy dữ liệu công nhân trong hình ảnh.');
-        }
-      } catch (error: any) {
-        console.error(error);
-        alert(`Có lỗi xảy ra khi xử lý hình ảnh với AI: ${error.message}`);
-      } finally {
-        setIsExtractingWorker(false);
-        if (workerFileInputRef.current) workerFileInputRef.current.value = '';
+        const newWorkers = data.map((item: any) => ({
+          id: `w-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          name: item.name || 'Unhamed Worker',
+          code: item.code || 'CODE',
+          skills: item.skills ? (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : item.skills) : [],
+          line: (item.line || newWorker.line || 'Chuyền 1').trim(),
+          performance: 0
+        }));
+        setWorkers([...workers, ...newWorkers]);
+        alert(`Đã nhận diện và thêm ${newWorkers.length} công nhân thành công!`);
+      } else {
+        alert('Không tìm thấy dữ liệu công nhân trong hình ảnh.');
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (error: any) {
+      console.error(error);
+      alert(`Có lỗi xảy ra khi xử lý hình ảnh với AI: ${error.message}`);
+    } finally {
+      setIsExtractingWorker(false);
+      if (workerFileInputRef.current) workerFileInputRef.current.value = '';
+    }
   };
 
   const handleAddOperation = () => {
@@ -259,53 +289,40 @@ export default function App() {
     if (!file) return;
 
     setIsExtracting(true);
-    const reader = new FileReader();
-    reader.onload = async (e) => {
-      const result = e.target?.result;
-      if (!result || typeof result !== 'string') {
-        setIsExtracting(false);
-        return;
+    try {
+      const base64 = await compressImage(file);
+      const response = await fetch('/api/extract-operation', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: base64, mimeType: 'image/jpeg' })
+      });
+      
+      const data = await response.json();
+      
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to extract data');
       }
       
-      const base64 = result.includes(',') ? result.split(',')[1] : result;
-      try {
-        const response = await fetch('/api/extract-operation', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ image: base64, mimeType: file.type })
-        });
-        
-        const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || 'Failed to extract data');
-        }
-        
-        if (Array.isArray(data) && data.length > 0) {
-          // If multiple operations were found, we can either set the first one or prompt to add all
-          // For now, let's just populate the form with the first one found or add them all if the user prefers.
-          // Let's add all of them to the operations list directly.
-          const newOps = data.map((item: any) => ({
-            id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-            name: item.name || 'Unhamed Operation',
-            code: item.code || 'CODE',
-            sam: Number(item.sam) || 0,
-            targetPerHour: Number(item.target) || 0
-          }));
-          setOperations([...operations, ...newOps]);
-          alert(`Đã nhận diện và thêm ${newOps.length} công đoạn thành công!`);
-        } else {
-          alert('Không tìm thấy dữ liệu công đoạn trong hình ảnh.');
-        }
-      } catch (error: any) {
-        console.error(error);
-        alert(`Có lỗi xảy ra khi xử lý hình ảnh với AI: ${error.message}`);
-      } finally {
-        setIsExtracting(false);
-        if (fileInputRef.current) fileInputRef.current.value = '';
+      if (Array.isArray(data) && data.length > 0) {
+        const newOps = data.map((item: any) => ({
+          id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          name: item.name || 'Unhamed Operation',
+          code: item.code || 'CODE',
+          sam: Number(item.sam) || 0,
+          targetPerHour: Number(item.target) || 0
+        }));
+        setOperations([...operations, ...newOps]);
+        alert(`Đã nhận diện và thêm ${newOps.length} công đoạn thành công!`);
+      } else {
+        alert('Không tìm thấy dữ liệu công đoạn trong hình ảnh.');
       }
-    };
-    reader.readAsDataURL(file);
+    } catch (error: any) {
+      console.error(error);
+      alert(`Có lỗi xảy ra khi xử lý hình ảnh với AI: ${error.message}`);
+    } finally {
+      setIsExtracting(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
   };
 
   const handleAddOrder = () => {
