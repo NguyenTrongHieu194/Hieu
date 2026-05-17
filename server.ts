@@ -1,0 +1,181 @@
+import express from "express";
+import path from "path";
+import { createServer as createViteServer } from "vite";
+import { GoogleGenAI } from "@google/genai";
+import dotenv from "dotenv";
+
+dotenv.config();
+
+async function startServer() {
+  const app = express();
+  const PORT = 3000;
+
+  app.use(express.json({ limit: "50mb" }));
+
+  const ai = new GoogleGenAI({
+    apiKey: process.env.GEMINI_API_KEY,
+    httpOptions: {
+      headers: {
+        'User-Agent': 'aistudio-build',
+      }
+    }
+  });
+
+  // API Route for AI Extraction - Operations
+  app.post("/api/extract-operation", async (req, res) => {
+    try {
+      const { image, mimeType } = req.body;
+
+      if (!image) {
+        return res.status(400).json({ error: "No image provided" });
+      }
+
+      const prompt = `
+        You are an industrial engineer in a garment factory. 
+        Analyze the attached image or document which contains operation definitions or SAM data.
+        Extract the following information for EACH operation found:
+        - name: The name of the operation
+        - code: The unique code for the operation
+        - sam: Standard Allowed Minutes (a number)
+        - target: Target per hour (a number)
+
+        Return ONLY a JSON array of objects with these keys: name, code, sam, target.
+        Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON array.
+      `;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: mimeType || "image/jpeg",
+                  data: image,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      let text = result.text.trim();
+      
+      // Advanced cleanup of response text
+      if (text.includes("[") && text.includes("]")) {
+        const start = text.indexOf("[");
+        const end = text.lastIndexOf("]") + 1;
+        text = text.substring(start, end);
+      }
+      
+      try {
+        const extractedData = JSON.parse(text);
+        res.json(extractedData);
+      } catch (parseError) {
+        console.error("JSON Parse Error. Data received:", text);
+        throw new Error("Could not parse AI response as JSON");
+      }
+    } catch (error: any) {
+      console.error("AI Extraction Error:", error);
+      
+      // Better user-facing error for Quota
+      if (error.message?.includes("429") || error.message?.includes("quota")) {
+        return res.status(429).json({ 
+          error: "Hệ thống AI đang tạm thời quá tải hoặc hết hạn mức miễn phí (Quota exceeded). Vui lòng thử lại sau ít phút hoặc ngày mai. Nếu bạn có tài khoản trả phí, hãy cấu hình API Key trong Settings." 
+        });
+      }
+      
+      res.status(500).json({ error: error.message || "Failed to process image" });
+    }
+  });
+
+  // API Route for AI Extraction - Workers
+  app.post("/api/extract-worker", async (req, res) => {
+    try {
+      const { image, mimeType } = req.body;
+
+      if (!image) {
+        return res.status(400).json({ error: "No image provided" });
+      }
+
+      const prompt = `
+        You are an HR manager in a garment factory. 
+        Analyze the attached image or document which contains a list of workers or employees.
+        Extract the following information for EACH worker found:
+        - name: The full name of the worker
+        - code: The worker ID or code
+        - line: The sewing line name (e.g. "Chuyền 1", "Line A"). If not specified per worker, look for a header indicating the line for the whole sheet.
+        - skills: A comma-separated list of their sewing skills (e.g. "1 kim, 2 kim, vắt sổ")
+
+        Return ONLY a JSON array of objects with these keys: name, code, line, skills.
+        Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON array.
+      `;
+
+      const result = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [
+          {
+            parts: [
+              { text: prompt },
+              {
+                inlineData: {
+                  mimeType: mimeType || "image/jpeg",
+                  data: image,
+                },
+              },
+            ],
+          },
+        ],
+      });
+
+      let text = result.text.trim();
+      
+      // Advanced cleanup of response text
+      if (text.includes("[") && text.includes("]")) {
+        const start = text.indexOf("[");
+        const end = text.lastIndexOf("]") + 1;
+        text = text.substring(start, end);
+      }
+      
+      try {
+        const extractedData = JSON.parse(text);
+        res.json(extractedData);
+      } catch (parseError) {
+        console.error("JSON Parse Error. Data received:", text);
+        throw new Error("Could not parse AI response as JSON");
+      }
+    } catch (error: any) {
+      console.error("AI Worker Extraction Error:", error);
+      
+      if (error.message?.includes("429") || error.message?.includes("quota")) {
+        return res.status(429).json({ 
+          error: "Hệ thống AI đang tạm thời quá tải. Vui lòng thử lại sau." 
+        });
+      }
+      
+      res.status(500).json({ error: error.message || "Failed to process image" });
+    }
+  });
+
+  // Vite middleware for development
+  if (process.env.NODE_ENV !== "production") {
+    const vite = await createViteServer({
+      server: { middlewareMode: true },
+      appType: "spa",
+    });
+    app.use(vite.middlewares);
+  } else {
+    const distPath = path.join(process.cwd(), "dist");
+    app.use(express.static(distPath));
+    app.get("*", (req, res) => {
+      res.sendFile(path.join(distPath, "index.html"));
+    });
+  }
+
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`Server running on http://localhost:${PORT}`);
+  });
+}
+
+startServer();

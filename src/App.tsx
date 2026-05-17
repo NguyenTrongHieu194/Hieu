@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { 
   Users, 
   Settings, 
@@ -14,7 +14,9 @@ import {
   Menu,
   X,
   Scissors,
-  User
+  User,
+  FileUp,
+  Loader2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { useLocalStorage } from './hooks/useLocalStorage';
@@ -76,8 +78,12 @@ export default function App() {
     date: format(new Date(), 'yyyy-MM-dd')
   });
 
-  const [newWorker, setNewWorker] = useState({ name: '', code: '', skills: '', line: lines[0] || 'Chuyền 1' });
+  const [newWorker, setNewWorker] = useState({ name: '', code: '', skills: '', line: '' });
   const [newOperation, setNewOperation] = useState({ name: '', code: '', sam: 0, target: 0 });
+  const [isExtracting, setIsExtracting] = useState(false);
+  const [isExtractingWorker, setIsExtractingWorker] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const workerFileInputRef = useRef<HTMLInputElement>(null);
   const [newOrder, setNewOrder] = useState({ customer: '', style: '', job: '', quantity: 0, deadline: '' });
   const [prodFilterLine, setProdFilterLine] = useState('');
   const [prodFilterOrder, setProdFilterOrder] = useState('');
@@ -91,7 +97,9 @@ export default function App() {
   };
 
   const handleDeleteLine = (lineName: string) => {
-    setLines(prev => prev.filter(l => l !== lineName));
+    if (window.confirm(`Bạn có chắc chắn muốn xoá chuyền "${lineName}"?`)) {
+      setLines(prev => prev.filter(l => l !== lineName));
+    }
   };
 
   // Handlers
@@ -146,19 +154,82 @@ export default function App() {
 
   const handleAddWorker = () => {
     if (!newWorker.name || !newWorker.code) return;
+    
+    // Add to lines if not exists
+    const lineName = newWorker.line.trim() || 'Chuyền 1';
+    if (!lines.includes(lineName)) {
+      setLines([...lines, lineName]);
+    }
+
     const worker: Worker = {
       id: `w-${Date.now()}`,
       name: newWorker.name,
       code: newWorker.code,
       skills: newWorker.skills.split(',').map(s => s.trim()),
-      line: newWorker.line,
+      line: lineName,
       performance: 0
     };
     setWorkers([...workers, worker]);
-    setNewWorker({ name: '', code: '', skills: '', line: 'Chuyền 1' });
+    setNewWorker({ name: '', code: '', skills: '', line: '' });
   };
 
-  const handleDeleteWorker = (id: string) => setWorkers(workers.filter(w => w.id !== id));
+  const handleDeleteWorker = (id: string) => {
+    setWorkers(workers.filter(w => w.id !== id));
+  };
+
+  const handleWorkerFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsExtractingWorker(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target?.result?.toString().split(',')[1];
+      try {
+        const response = await fetch('/api/extract-worker', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, mimeType: file.type })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to extract worker data');
+        }
+        
+        if (Array.isArray(data) && data.length > 0) {
+          // Identify all line names needed (both from AI and current manual entry)
+          const detectedLines = data.map((item: any) => (item.line || newWorker.line || 'Chuyền 1').trim());
+          const uniqueNewLines = Array.from(new Set(detectedLines)).filter(l => !lines.includes(l));
+          
+          if (uniqueNewLines.length > 0) {
+            setLines([...lines, ...uniqueNewLines]);
+          }
+
+          const newWorkers = data.map((item: any) => ({
+            id: `w-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: item.name || 'Unhamed Worker',
+            code: item.code || 'CODE',
+            skills: item.skills ? (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : item.skills) : [],
+            line: (item.line || newWorker.line || 'Chuyền 1').trim(),
+            performance: 0
+          }));
+          setWorkers([...workers, ...newWorkers]);
+          alert(`Đã nhận diện và thêm ${newWorkers.length} công nhân thành công!`);
+        } else {
+          alert('Không tìm thấy dữ liệu công nhân trong hình ảnh.');
+        }
+      } catch (error: any) {
+        console.error(error);
+        alert(`Có lỗi xảy ra khi xử lý hình ảnh với AI: ${error.message}`);
+      } finally {
+        setIsExtractingWorker(false);
+        if (workerFileInputRef.current) workerFileInputRef.current.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleAddOperation = () => {
     if (!newOperation.name || !newOperation.code) return;
@@ -173,7 +244,57 @@ export default function App() {
     setNewOperation({ name: '', code: '', sam: 0, target: 0 });
   };
 
-  const handleDeleteOperation = (id: string) => setOperations(operations.filter(op => op.id !== id));
+  const handleDeleteOperation = (id: string) => {
+    setOperations(operations.filter(op => op.id !== id));
+  };
+
+  const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    setIsExtracting(true);
+    const reader = new FileReader();
+    reader.onload = async (e) => {
+      const base64 = e.target?.result?.toString().split(',')[1];
+      try {
+        const response = await fetch('/api/extract-operation', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, mimeType: file.type })
+        });
+        
+        const data = await response.json();
+        
+        if (!response.ok) {
+          throw new Error(data.error || 'Failed to extract data');
+        }
+        
+        if (Array.isArray(data) && data.length > 0) {
+          // If multiple operations were found, we can either set the first one or prompt to add all
+          // For now, let's just populate the form with the first one found or add them all if the user prefers.
+          // Let's add all of them to the operations list directly.
+          const newOps = data.map((item: any) => ({
+            id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+            name: item.name || 'Unhamed Operation',
+            code: item.code || 'CODE',
+            sam: Number(item.sam) || 0,
+            targetPerHour: Number(item.target) || 0
+          }));
+          setOperations([...operations, ...newOps]);
+          alert(`Đã nhận diện và thêm ${newOps.length} công đoạn thành công!`);
+        } else {
+          alert('Không tìm thấy dữ liệu công đoạn trong hình ảnh.');
+        }
+      } catch (error: any) {
+        console.error(error);
+        alert(`Có lỗi xảy ra khi xử lý hình ảnh với AI: ${error.message}`);
+      } finally {
+        setIsExtracting(false);
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsDataURL(file);
+  };
 
   const handleAddOrder = () => {
     if (!newOrder.customer || !newOrder.style) return;
@@ -193,7 +314,6 @@ export default function App() {
 
   const handleDeleteOrder = (id: string) => {
     setOrders(prev => prev.filter(o => o.id !== id));
-    // Also cleanup logs if necessary, though usually we keep history
   };
 
   const handleAddTimeStudyRecord = () => {
@@ -515,31 +635,30 @@ export default function App() {
                 className="space-y-6"
               >
                 <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6">
-                  {/* Line Management */}
-                  <div>
-                    <h4 className="text-xs font-bold uppercase text-gray-400 mb-3 tracking-widest">Quản lý Chuyền may</h4>
-                    <div className="flex gap-2 flex-wrap">
-                      {lines.map(line => (
-                        <div key={line} className="flex items-center gap-2 bg-gray-50 px-3 py-1.5 rounded-lg border border-gray-100">
-                          <span className="text-xs font-bold text-gray-700">{line}</span>
-                          <button onClick={() => handleDeleteLine(line)} className="text-gray-300 hover:text-rose-500"><X size={14}/></button>
-                        </div>
-                      ))}
-                      <div className="flex gap-1">
-                        <input 
-                          placeholder="Tên chuyền mới"
-                          value={newLineName}
-                          onChange={e => setNewLineName(e.target.value)}
-                          className="px-3 py-1.5 rounded-lg border border-gray-200 text-xs outline-none focus:ring-1 focus:ring-indigo-500 w-32"
-                        />
-                        <button onClick={handleAddLine} className="bg-indigo-600 text-white p-1.5 rounded-lg hover:bg-indigo-700"><Plus size={16}/></button>
-                      </div>
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold font-serif italic">Thêm công nhân mới</h3>
+                    <div className="flex items-center gap-2">
+                       <input 
+                         type="file" 
+                         ref={workerFileInputRef} 
+                         className="hidden" 
+                         accept="image/*,.pdf" 
+                         onChange={handleWorkerFileUpload} 
+                       />
+                       <button 
+                         onClick={() => workerFileInputRef.current?.click()}
+                         disabled={isExtractingWorker}
+                         className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors font-bold text-xs uppercase tracking-widest disabled:opacity-50"
+                       >
+                         {isExtractingWorker ? (
+                           <Loader2 className="animate-spin" size={16} />
+                         ) : (
+                           <FileUp size={16} />
+                         )}
+                         {isExtractingWorker ? 'Đang xử lý AI...' : 'Tải ảnh/tệp AI'}
+                       </button>
                     </div>
                   </div>
-
-                  <div className="h-px bg-gray-50" />
-
-                  <h3 className="text-xl font-bold font-serif italic">Thêm công nhân mới</h3>
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <input 
                       placeholder="Tên công nhân"
@@ -553,13 +672,12 @@ export default function App() {
                       onChange={e => setNewWorker({...newWorker, code: e.target.value})}
                       className="p-3 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
-                    <select
+                    <input 
+                      placeholder="Chuyền"
                       value={newWorker.line}
                       onChange={e => setNewWorker({...newWorker, line: e.target.value})}
-                      className="p-3 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none bg-white"
-                    >
-                      {lines.map(l => <option key={l} value={l}>{l}</option>)}
-                    </select>
+                      className="p-3 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                    />
                     <input 
                       placeholder="Kỹ năng"
                       value={newWorker.skills}
@@ -625,12 +743,14 @@ export default function App() {
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-500">{worker.line}</td>
                           <td className="px-6 py-4 text-right">
-                             <button 
-                               onClick={() => handleDeleteWorker(worker.id)}
-                               className="text-gray-400 hover:text-rose-500 transition-colors p-2"
-                             >
-                               <X size={18} />
-                             </button>
+                               <button 
+                                 type="button"
+                                 onClick={() => handleDeleteWorker(worker.id)}
+                                 className="inline-flex items-center justify-center w-10 h-10 text-rose-500 hover:bg-rose-100 transition-colors rounded-full cursor-pointer relative z-50 pointer-events-auto"
+                                 title="Xoá công nhân"
+                               >
+                                 <X size={20} />
+                               </button>
                           </td>
                         </tr>
                       ))}
@@ -648,8 +768,32 @@ export default function App() {
                 exit={{ opacity: 0, x: -20 }}
                 className="space-y-6"
               >
-                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                  <h3 className="text-xl font-bold font-serif italic mb-4">Thêm công đoạn định mức</h3>
+                <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm relative overflow-hidden">
+                  <div className="flex justify-between items-center mb-6">
+                    <h3 className="text-xl font-bold font-serif italic">Định mức Công đoạn</h3>
+                    <div className="flex items-center gap-2">
+                       <input 
+                         type="file" 
+                         ref={fileInputRef} 
+                         className="hidden" 
+                         accept="image/*,.pdf" 
+                         onChange={handleFileUpload} 
+                       />
+                       <button 
+                         onClick={() => fileInputRef.current?.click()}
+                         disabled={isExtracting}
+                         className="flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-50 text-indigo-600 hover:bg-indigo-100 transition-colors font-bold text-xs uppercase tracking-widest disabled:opacity-50"
+                       >
+                         {isExtracting ? (
+                           <Loader2 className="animate-spin" size={16} />
+                         ) : (
+                           <FileUp size={16} />
+                         )}
+                         {isExtracting ? 'Đang xử lý AI...' : 'Tải ảnh/tệp AI'}
+                       </button>
+                    </div>
+                  </div>
+                  
                   <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
                     <input 
                       placeholder="Tên công đoạn"
@@ -694,12 +838,14 @@ export default function App() {
                           {op.code}
                         </div>
                         <button 
+                          type="button"
                           onClick={() => handleDeleteOperation(op.id)}
-                          className="text-gray-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                          className="inline-flex items-center justify-center w-10 h-10 text-rose-500 hover:bg-rose-100 transition-colors rounded-full cursor-pointer relative z-50 pointer-events-auto"
+                          title="Xoá công đoạn"
                         >
-                          <X size={18} />
+                          <X size={20} />
                         </button>
-                      </div>
+                    </div>
                       <h4 className="text-lg font-bold text-gray-900 uppercase tracking-tight">{op.name}</h4>
                       <div className="mt-6 flex items-center justify-between border-t border-gray-50 pt-4">
                         <div>
@@ -982,12 +1128,12 @@ export default function App() {
                         <div className="absolute top-0 right-0 p-8 flex flex-col items-end">
                              <div className="flex items-center gap-2">
                                <button 
-                                 onClick={() => {
-                                   handleDeleteOrder(order.id);
-                                 }}
-                                 className="text-gray-400 hover:text-rose-500 transition-colors p-2 bg-gray-50 rounded-lg"
+                                 type="button"
+                                 onClick={() => handleDeleteOrder(order.id)}
+                                 className="inline-flex items-center justify-center w-10 h-10 text-rose-500 hover:bg-rose-100 transition-colors rounded-full cursor-pointer relative z-50 pointer-events-auto"
+                                 title="Xoá đơn hàng"
                                >
-                                 <X size={18} />
+                                 <X size={20} />
                                </button>
                                <span className={`px-4 py-1.5 rounded-full text-[10px] font-black uppercase tracking-widest ${
                                  order.status === 'in_progress' ? 'bg-indigo-50 text-indigo-600' : 'bg-orange-50 text-orange-600'
