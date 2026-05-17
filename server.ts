@@ -30,6 +30,9 @@ async function startServer() {
         return res.status(400).json({ error: "No image provided" });
       }
 
+      // Clean base64 string - remove any whitespace or potential prefix that might have leaked
+      const cleanBase64 = image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/\s/g, "");
+
       const prompt = `
         You are an industrial engineer in a garment factory. 
         Analyze the attached image or document which contains operation definitions or SAM data.
@@ -45,19 +48,17 @@ async function startServer() {
 
       const result = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: mimeType || "image/jpeg",
-                  data: image,
-                },
+        contents: {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType || "image/jpeg",
+                data: cleanBase64,
               },
-            ],
-          },
-        ],
+            },
+          ],
+        },
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -90,19 +91,26 @@ async function startServer() {
         res.json(extractedData);
       } catch (parseError) {
         console.error("JSON Parse Error. Data received:", text);
-        throw new Error("Could not parse AI response as JSON");
+        res.status(500).json({ error: "Dữ liệu AI trả về không đúng định dạng. Vui lòng thử lại với ảnh rõ nét hơn." });
       }
     } catch (error: any) {
       console.error("AI Extraction Error:", error);
       
-      // Better user-facing error for Quota
-      if (error.message?.includes("429") || error.message?.includes("quota")) {
+      const errorMessage = error.message || "";
+      
+      if (errorMessage.includes("429") || errorMessage.includes("quota")) {
         return res.status(429).json({ 
-          error: "Hệ thống AI đang tạm thời quá tải hoặc hết hạn mức miễn phí (Quota exceeded). Vui lòng thử lại sau ít phút hoặc ngày mai. Nếu bạn có tài khoản trả phí, hãy cấu hình API Key trong Settings." 
+          error: "Hệ thống AI đang tạm thời quá tải hoặc hết hạn mức miễn phí (Quota exceeded). Vui lòng thử lại sau ít phút hoặc ngày mai." 
+        });
+      }
+
+      if (errorMessage.includes("expected pattern")) {
+        return res.status(400).json({
+          error: "Định dạng hình ảnh không hợp lệ hoặc quá lớn. Vui lòng thử nén ảnh hoặc chụp lại."
         });
       }
       
-      res.status(500).json({ error: error.message || "Failed to process image" });
+      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + (error.message || "Unknown error") });
     }
   });
 
@@ -114,6 +122,9 @@ async function startServer() {
       if (!image) {
         return res.status(400).json({ error: "No image provided" });
       }
+
+      // Clean base64 string
+      const cleanBase64 = image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/\s/g, "");
 
       const prompt = `
         You are an HR manager in a garment factory. 
@@ -130,19 +141,17 @@ async function startServer() {
 
       const result = await ai.models.generateContent({
         model: "gemini-3-flash-preview",
-        contents: [
-          {
-            parts: [
-              { text: prompt },
-              {
-                inlineData: {
-                  mimeType: mimeType || "image/jpeg",
-                  data: image,
-                },
+        contents: {
+          parts: [
+            { text: prompt },
+            {
+              inlineData: {
+                mimeType: mimeType || "image/jpeg",
+                data: cleanBase64,
               },
-            ],
-          },
-        ],
+            },
+          ],
+        },
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -175,18 +184,26 @@ async function startServer() {
         res.json(extractedData);
       } catch (parseError) {
         console.error("JSON Parse Error. Data received:", text);
-        throw new Error("Could not parse AI response as JSON");
+        res.status(500).json({ error: "Dữ liệu AI trả về không đúng định dạng. Vui lòng thử lại với ảnh rõ nét hơn." });
       }
     } catch (error: any) {
       console.error("AI Worker Extraction Error:", error);
       
-      if (error.message?.includes("429") || error.message?.includes("quota")) {
+      const errorMessage = error.message || "";
+
+      if (errorMessage.includes("429") || errorMessage.includes("quota")) {
         return res.status(429).json({ 
-          error: "Hệ thống AI đang tạm thời quá tải. Vui lòng thử lại sau." 
+          error: "Hệ thống AI đang tạm thời quá tải. Vui lòng thử lại sau ít phút hoặc ngày mai." 
+        });
+      }
+
+      if (errorMessage.includes("expected pattern")) {
+        return res.status(400).json({
+          error: "Định dạng hình ảnh không hợp lệ hoặc quá lớn. Vui lòng thử nén ảnh hoặc chụp lại."
         });
       }
       
-      res.status(500).json({ error: error.message || "Failed to process image" });
+      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + (error.message || "Unknown error") });
     }
   });
 
