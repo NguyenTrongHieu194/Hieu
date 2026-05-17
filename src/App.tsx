@@ -184,7 +184,13 @@ export default function App() {
     setIsExtractingWorker(true);
     const reader = new FileReader();
     reader.onload = async (e) => {
-      const base64 = e.target?.result?.toString().split(',')[1];
+      const result = e.target?.result;
+      if (!result || typeof result !== 'string') {
+        setIsExtractingWorker(false);
+        return;
+      }
+      
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
       try {
         const response = await fetch('/api/extract-worker', {
           method: 'POST',
@@ -255,7 +261,13 @@ export default function App() {
     setIsExtracting(true);
     const reader = new FileReader();
     reader.onload = async (e) => {
-      const base64 = e.target?.result?.toString().split(',')[1];
+      const result = e.target?.result;
+      if (!result || typeof result !== 'string') {
+        setIsExtracting(false);
+        return;
+      }
+      
+      const base64 = result.includes(',') ? result.split(',')[1] : result;
       try {
         const response = await fetch('/api/extract-operation', {
           method: 'POST',

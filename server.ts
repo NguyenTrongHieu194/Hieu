@@ -1,7 +1,7 @@
 import express from "express";
 import path from "path";
 import { createServer as createViteServer } from "vite";
-import { GoogleGenAI } from "@google/genai";
+import { GoogleGenAI, Type } from "@google/genai";
 import dotenv from "dotenv";
 
 dotenv.config();
@@ -58,19 +58,35 @@ async function startServer() {
             ],
           },
         ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                code: { type: Type.STRING },
+                sam: { type: Type.NUMBER },
+                target: { type: Type.NUMBER },
+              },
+              required: ["name", "code", "sam", "target"],
+            },
+          },
+        }
       });
 
-      let text = result.text.trim();
-      
-      // Advanced cleanup of response text
-      if (text.includes("[") && text.includes("]")) {
-        const start = text.indexOf("[");
-        const end = text.lastIndexOf("]") + 1;
-        text = text.substring(start, end);
+      let text = result.text || "[]";
+      if (typeof text === 'string') {
+        text = text.trim();
+        // Remove markdown formatting if still present
+        if (text.startsWith("```")) {
+          text = text.replace(/^```json\n?/, "").replace(/\n?```$/, "");
+        }
       }
       
       try {
-        const extractedData = JSON.parse(text);
+        const extractedData = typeof text === 'string' ? JSON.parse(text) : text;
         res.json(extractedData);
       } catch (parseError) {
         console.error("JSON Parse Error. Data received:", text);
@@ -127,19 +143,35 @@ async function startServer() {
             ],
           },
         ],
+        config: {
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                name: { type: Type.STRING },
+                code: { type: Type.STRING },
+                line: { type: Type.STRING },
+                skills: { type: Type.STRING },
+              },
+              required: ["name", "code", "line", "skills"],
+            },
+          },
+        }
       });
 
-      let text = result.text.trim();
-      
-      // Advanced cleanup of response text
-      if (text.includes("[") && text.includes("]")) {
-        const start = text.indexOf("[");
-        const end = text.lastIndexOf("]") + 1;
-        text = text.substring(start, end);
+      let text = result.text || "[]";
+      if (typeof text === 'string') {
+        text = text.trim();
+        // Remove markdown formatting if still present
+        if (text.startsWith("```")) {
+          text = text.replace(/^```json\n?/, "").replace(/\n?```$/, "");
+        }
       }
       
       try {
-        const extractedData = JSON.parse(text);
+        const extractedData = typeof text === 'string' ? JSON.parse(text) : text;
         res.json(extractedData);
       } catch (parseError) {
         console.error("JSON Parse Error. Data received:", text);
