@@ -30,8 +30,14 @@ async function startServer() {
         return res.status(400).json({ error: "No image provided" });
       }
 
-      // Clean base64 string - remove any whitespace or potential prefix that might have leaked
-      const cleanBase64 = image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/\s/g, "");
+      // Clean base64 string - remove any whitespace or potential prefix
+      const cleanBase64 = typeof image === 'string' 
+        ? image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/[\s\r\n]/g, "") 
+        : "";
+
+      if (!cleanBase64) {
+        return res.status(400).json({ error: "Invalid image data" });
+      }
 
       const prompt = `
         You are an industrial engineer in a garment factory. 
@@ -43,12 +49,11 @@ async function startServer() {
         - target: Target per hour (a number)
 
         Return ONLY a JSON array of objects with these keys: name, code, sam, target.
-        Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON array.
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
+        model: "gemini-flash-latest",
+        contents: [{
           parts: [
             { text: prompt },
             {
@@ -58,7 +63,7 @@ async function startServer() {
               },
             },
           ],
-        },
+        }],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
@@ -124,7 +129,13 @@ async function startServer() {
       }
 
       // Clean base64 string
-      const cleanBase64 = image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/\s/g, "");
+      const cleanBase64 = typeof image === 'string' 
+        ? image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/[\s\r\n]/g, "") 
+        : "";
+
+      if (!cleanBase64) {
+        return res.status(400).json({ error: "Invalid image data" });
+      }
 
       const prompt = `
         You are an HR manager in a garment factory. 
@@ -136,12 +147,11 @@ async function startServer() {
         - skills: A comma-separated list of their sewing skills (e.g. "1 kim, 2 kim, vắt sổ")
 
         Return ONLY a JSON array of objects with these keys: name, code, line, skills.
-        Do NOT include any markdown formatting like \`\`\`json. Just the raw JSON array.
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-3-flash-preview",
-        contents: {
+        model: "gemini-flash-latest",
+        contents: [{
           parts: [
             { text: prompt },
             {
@@ -151,7 +161,7 @@ async function startServer() {
               },
             },
           ],
-        },
+        }],
         config: {
           responseMimeType: "application/json",
           responseSchema: {
