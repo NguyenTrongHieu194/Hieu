@@ -1,0 +1,140 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 0. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    // --- Validation Blueprints ---
+    
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email']) &&
+             data.keys().size() <= 8 &&
+             data.uid == request.auth.uid &&
+             data.email is string && data.email.size() <= 200;
+    }
+
+    function isValidGarmentLine(data, userId) {
+      return data.keys().hasAll(['name', 'userId']) &&
+             data.keys().size() == 2 &&
+             data.userId == userId &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100;
+    }
+
+    function isValidWorker(data, userId) {
+      return data.keys().hasAll(['name', 'code', 'userId']) &&
+             data.keys().size() <= 7 &&
+             data.userId == userId &&
+             data.name is string && data.name.size() <= 100 &&
+             data.code is string && data.code.size() <= 50;
+    }
+
+    function isValidOperation(data, userId) {
+      return data.keys().hasAll(['name', 'code', 'userId']) &&
+             data.keys().size() <= 8 &&
+             data.userId == userId &&
+             data.name is string && data.name.size() <= 200 &&
+             data.code is string && data.code.size() <= 50;
+    }
+
+    function isValidProductionOrder(data, userId) {
+      return data.keys().hasAll(['customer', 'styleName', 'orderQuantity', 'userId']) &&
+             data.keys().size() <= 9 &&
+             data.userId == userId &&
+             data.customer is string && data.customer.size() <= 200 &&
+             data.styleName is string && data.styleName.size() <= 200 &&
+             data.orderQuantity is number && data.orderQuantity >= 0;
+    }
+
+    function isValidProductionLog(data, userId) {
+      return data.keys().hasAll(['date', 'orderId', 'actualQuantity', 'hour', 'userId']) &&
+             data.keys().size() <= 10 &&
+             data.userId == userId &&
+             data.date is string && data.date.size() <= 20 &&
+             data.orderId is string &&
+             data.actualQuantity is number &&
+             data.hour is number;
+    }
+
+    function isValidTimeStudyRecord(data, userId) {
+      return data.keys().hasAll(['date', 'workerId', 'operationId', 'orderId', 'times', 'userId']) &&
+             data.keys().size() <= 12 &&
+             data.userId == userId &&
+             data.times is list && data.times.size() <= 50;
+    }
+
+    // --- Collection Matches ---
+
+    match /users/{userId} {
+      allow get: if isOwner(userId);
+      allow create: if isOwner(userId) && isValidUser(incoming());
+      allow update: if isOwner(userId) && isValidUser(incoming());
+
+      // Subcollections
+      
+      match /lines/{lineId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(lineId) && isValidGarmentLine(incoming(), userId);
+        allow update: if isOwner(userId) && isValidGarmentLine(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /workers/{workerId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(workerId) && isValidWorker(incoming(), userId);
+        allow update: if isOwner(userId) && isValidWorker(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /operations/{opId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(opId) && isValidOperation(incoming(), userId);
+        allow update: if isOwner(userId) && isValidOperation(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /orders/{orderId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(orderId) && isValidProductionOrder(incoming(), userId);
+        allow update: if isOwner(userId) && isValidProductionOrder(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /productionLogs/{logId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(logId) && isValidProductionLog(incoming(), userId);
+        allow update: if isOwner(userId) && isValidProductionLog(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /timeStudies/{studyId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(studyId) && isValidTimeStudyRecord(incoming(), userId);
+        allow update: if isOwner(userId) && isValidTimeStudyRecord(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+    }
+  }
+}

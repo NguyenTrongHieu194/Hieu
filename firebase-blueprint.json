@@ -1,0 +1,136 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and settings",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "email": { "type": "string", "format": "email" },
+        "displayName": { "type": "string" },
+        "photoURL": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "email"]
+    },
+    "GarmentLine": {
+      "title": "Garment Line",
+      "description": "A production line in the factory",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["name", "userId"]
+    },
+    "Worker": {
+      "title": "Worker",
+      "description": "A garment factory worker",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "skills": { "type": "array", "items": { "type": "string" } },
+        "line": { "type": "string" },
+        "performance": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["name", "code", "userId"]
+    },
+    "Operation": {
+      "title": "Operation",
+      "description": "A sewing operation for a garment",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "code": { "type": "string" },
+        "style": { "type": "string" },
+        "sam": { "type": "number" },
+        "targetPerHour": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["name", "code", "userId"]
+    },
+    "ProductionOrder": {
+      "title": "Production Order",
+      "description": "A garment manufacturing order",
+      "type": "object",
+      "properties": {
+        "customer": { "type": "string" },
+        "styleName": { "type": "string" },
+        "job": { "type": "string" },
+        "orderQuantity": { "type": "number" },
+        "producedQuantity": { "type": "number" },
+        "deadline": { "type": "string" },
+        "status": { "type": "string", "enum": ["planning", "in_progress", "completed"] },
+        "userId": { "type": "string" }
+      },
+      "required": ["customer", "styleName", "orderQuantity", "userId"]
+    },
+    "ProductionLog": {
+      "title": "Production Log",
+      "description": "A log of units produced in an hour",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "line": { "type": "string" },
+        "workerId": { "type": "string" },
+        "operationId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "actualQuantity": { "type": "number" },
+        "hour": { "type": "number" },
+        "targetQuantity": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["date", "orderId", "actualQuantity", "hour", "userId"]
+    },
+    "TimeStudyRecord": {
+      "title": "Time Study Record",
+      "description": "A time study recording for an operation",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string", "format": "date" },
+        "workerId": { "type": "string" },
+        "operationId": { "type": "string" },
+        "orderId": { "type": "string" },
+        "times": { "type": "array", "items": { "type": "number" } },
+        "averageTime": { "type": "number" },
+        "targetPerHour": { "type": "number" },
+        "targetPerDay": { "type": "number" },
+        "userId": { "type": "string" }
+      },
+      "required": ["date", "workerId", "operationId", "orderId", "times", "userId"]
+    }
+  },
+  "firestore": {
+    "users": {
+      "schema": "User",
+      "description": "Global user registry"
+    },
+    "users/{userId}/lines": {
+      "schema": "GarmentLine",
+      "description": "User's factory lines"
+    },
+    "users/{userId}/workers": {
+      "schema": "Worker",
+      "description": "User's worker database"
+    },
+    "users/{userId}/operations": {
+      "schema": "Operation",
+      "description": "User's operation database"
+    },
+    "users/{userId}/orders": {
+      "schema": "ProductionOrder",
+      "description": "User's production orders"
+    },
+    "users/{userId}/productionLogs": {
+      "schema": "ProductionLog",
+      "description": "User's production records"
+    },
+    "users/{userId}/timeStudies": {
+      "schema": "TimeStudyRecord",
+      "description": "User's time study database"
+    }
+  }
+}

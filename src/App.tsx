@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { 
   Users, 
   Settings, 
@@ -14,18 +14,35 @@ import {
   Menu,
   X,
   Scissors,
-  User,
+  User as UserIcon,
   FileUp,
-  Loader2
+  Loader2,
+  LogIn
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
-import { useLocalStorage } from './hooks/useLocalStorage';
 import { 
-  INITIAL_WORKERS, 
-  INITIAL_OPERATIONS, 
-  INITIAL_ORDERS, 
-  INITIAL_LOGS 
-} from './constants';
+  auth, 
+  db, 
+  signInWithGoogle, 
+  logOut 
+} from './lib/firebase';
+import { 
+  onAuthStateChanged,
+  User as FirebaseUser
+} from 'firebase/auth';
+import {
+  collection,
+  query,
+  onSnapshot,
+  addDoc,
+  deleteDoc,
+  doc,
+  updateDoc,
+  setDoc,
+  getDocs,
+  where,
+  Timestamp
+} from 'firebase/firestore';
 import { Worker, Operation, ProductionOrder, ProductionLog, TimeStudyRecord } from './types';
 import { format } from 'date-fns';
 import { 
@@ -45,14 +62,108 @@ type Tab = 'dashboard' | 'workers' | 'operations' | 'production' | 'planning' | 
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
+  const [user, setUser] = useState<FirebaseUser | null>(null);
+  const [loading, setLoading] = useState(true);
 
-  // Persistence
-  const [lines, setLines] = useLocalStorage<string[]>('sewing_lines', ['Chuyền 1', 'Chuyền 2', 'Chuyền 3']);
-  const [workers, setWorkers] = useLocalStorage<Worker[]>('sewing_workers', INITIAL_WORKERS);
-  const [operations, setOperations] = useLocalStorage<Operation[]>('sewing_operations', INITIAL_OPERATIONS);
-  const [orders, setOrders] = useLocalStorage<ProductionOrder[]>('sewing_orders', INITIAL_ORDERS);
-  const [logs, setLogs] = useLocalStorage<ProductionLog[]>('sewing_logs', INITIAL_LOGS);
-  const [timeStudyRecords, setTimeStudyRecords] = useLocalStorage<TimeStudyRecord[]>('time_study_records', []);
+  // Persistence State
+  const [lines, setLines] = useState<string[]>([]);
+  const [workers, setWorkers] = useState<Worker[]>([]);
+  const [operations, setOperations] = useState<Operation[]>([]);
+  const [orders, setOrders] = useState<ProductionOrder[]>([]);
+  const [logs, setLogs] = useState<ProductionLog[]>([]);
+  const [timeStudyRecords, setTimeStudyRecords] = useState<TimeStudyRecord[]>([]);
+
+  // Auth Effect
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setUser(u);
+      setLoading(false);
+    });
+    return () => unsubscribe();
+  }, []);
+
+  // Data Subscription Effect
+  useEffect(() => {
+    if (!user) {
+      setLines([]);
+      setWorkers([]);
+      setOperations([]);
+      setOrders([]);
+      setLogs([]);
+      setTimeStudyRecords([]);
+      return;
+    }
+
+    const userPath = `users/${user.uid}`;
+
+    // Subscriptions
+    const unsubLines = onSnapshot(collection(db, `${userPath}/lines`), (snap) => {
+      const data = snap.docs.map(d => d.data().name as string);
+      setLines(data.length > 0 ? data : ['Chuyền 1', 'Chuyền 2', 'Chuyền 3']);
+    });
+
+    const unsubWorkers = onSnapshot(collection(db, `${userPath}/workers`), (snap) => {
+      setWorkers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Worker)));
+    });
+
+    const unsubOps = onSnapshot(collection(db, `${userPath}/operations`), (snap) => {
+      setOperations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Operation)));
+    });
+
+    const unsubOrders = onSnapshot(collection(db, `${userPath}/orders`), (snap) => {
+      setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionOrder)));
+    });
+
+    const unsubLogs = onSnapshot(collection(db, `${userPath}/productionLogs`), (snap) => {
+      setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionLog)));
+    });
+
+    const unsubTS = onSnapshot(collection(db, `${userPath}/timeStudies`), (snap) => {
+      setTimeStudyRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as TimeStudyRecord)));
+    });
+
+    return () => {
+      unsubLines();
+      unsubWorkers();
+      unsubOps();
+      unsubOrders();
+      unsubLogs();
+      unsubTS();
+    };
+  }, [user]);
+
+  // Firestore Helpers
+  const addDocToFirestore = async (col: string, data: any) => {
+    if (!user) return;
+    try {
+      await addDoc(collection(db, `users/${user.uid}/${col}`), {
+        ...data,
+        userId: user.uid,
+        createdAt: Timestamp.now()
+      });
+    } catch (e) {
+      console.error(e);
+      alert("Lỗi khi lưu dữ liệu lên đám mây.");
+    }
+  };
+
+  const deleteDocFromFirestore = async (col: string, id: string) => {
+    if (!user) return;
+    try {
+      await deleteDoc(doc(db, `users/${user.uid}/${col}`, id));
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const updateDocInFirestore = async (col: string, id: string, data: any) => {
+    if (!user) return;
+    try {
+      await updateDoc(doc(db, `users/${user.uid}/${col}`, id), data);
+    } catch (e) {
+      console.error(e);
+    }
+  };
 
   // UI State
   const [newLineName, setNewLineName] = useState('');
@@ -90,21 +201,34 @@ export default function App() {
   const [prodFilterOrder, setProdFilterOrder] = useState('');
   const [prodFilterDate, setProdFilterDate] = useState(format(new Date(), 'yyyy-MM-dd'));
 
-  const handleAddLine = () => {
-    if (!newLineName.trim()) return;
+  const handleAddLine = async () => {
+    if (!newLineName.trim() || !user) return;
     if (lines.includes(newLineName.trim())) return;
-    setLines([...lines, newLineName.trim()]);
-    setNewLineName('');
+    
+    try {
+      await setDoc(doc(db, `users/${user.uid}/lines`, newLineName.trim()), {
+        name: newLineName.trim(),
+        userId: user.uid
+      });
+      setNewLineName('');
+    } catch (e) {
+      console.error(e);
+    }
   };
 
-  const handleDeleteLine = (lineName: string) => {
+  const handleDeleteLine = async (lineName: string) => {
+    if (!user) return;
     if (window.confirm(`Bạn có chắc chắn muốn xoá chuyền "${lineName}"?`)) {
-      setLines(prev => prev.filter(l => l !== lineName));
+      try {
+        await deleteDoc(doc(db, `users/${user.uid}/lines`, lineName));
+      } catch (e) {
+        console.error(e);
+      }
     }
   };
 
   // Handlers
-  const handleAddLog = () => {
+  const handleAddLog = async () => {
     const { line, orderId, actualQuantity, date } = newLog;
     const qty = Number(actualQuantity);
 
@@ -113,69 +237,67 @@ export default function App() {
       return;
     }
 
-    const log: any = { // Use any briefly or update ProductionLog type
-      id: `log-${Date.now()}`,
+    const log: any = {
       date: date || format(new Date(), 'yyyy-MM-dd'),
       line,
       orderId,
       actualQuantity: qty,
-      // Keep these for dashboard compatibility (minimal dummy data)
       hour: new Date().getHours(),
       targetQuantity: 0 
     };
 
-    const updatedLogs = [...logs, log];
-    setLogs(updatedLogs);
+    await addDocToFirestore('productionLogs', log);
     
-    // Update order progress and status automatically
-    setOrders(prev => prev.map(o => 
-      o.id === orderId 
-        ? { 
-            ...o, 
-            producedQuantity: o.producedQuantity + qty,
-            status: 'in_progress'
-          }
-        : o
-    ));
+    // Update order progress
+    const order = orders.find(o => o.id === orderId);
+    if (order) {
+      await updateDocInFirestore('orders', orderId, {
+        producedQuantity: order.producedQuantity + qty,
+        status: 'in_progress'
+      });
+    }
 
     setNewLog({ ...newLog, actualQuantity: 0 });
   };
 
-  const handleDeleteLog = (id: string) => {
+  const handleDeleteLog = async (id: string) => {
     const logToDelete = logs.find(l => l.id === id);
     if (logToDelete && logToDelete.orderId) {
-      setOrders(prev => prev.map(o => 
-        o.id === logToDelete.orderId 
-          ? { ...o, producedQuantity: Math.max(0, o.producedQuantity - logToDelete.actualQuantity) }
-          : o
-      ));
+      const order = orders.find(o => o.id === logToDelete.orderId);
+      if (order) {
+        await updateDocInFirestore('orders', order.id, {
+          producedQuantity: Math.max(0, order.producedQuantity - logToDelete.actualQuantity)
+        });
+      }
     }
-    setLogs(logs.filter(l => l.id !== id));
+    await deleteDocFromFirestore('productionLogs', id);
   };
 
-  const handleAddWorker = () => {
-    if (!newWorker.name || !newWorker.code) return;
+  const handleAddWorker = async () => {
+    if (!newWorker.name || !newWorker.code || !user) return;
     
     // Add to lines if not exists
     const lineName = newWorker.line.trim() || 'Chuyền 1';
     if (!lines.includes(lineName)) {
-      setLines([...lines, lineName]);
+      await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
+        name: lineName,
+        userId: user.uid
+      });
     }
 
-    const worker: Worker = {
-      id: `w-${Date.now()}`,
+    const worker = {
       name: newWorker.name,
       code: newWorker.code,
       skills: newWorker.skills.split(',').map(s => s.trim()),
       line: lineName,
       performance: 0
     };
-    setWorkers([...workers, worker]);
+    await addDocToFirestore('workers', worker);
     setNewWorker({ name: '', code: '', skills: '', line: '' });
   };
 
-  const handleDeleteWorker = (id: string) => {
-    setWorkers(workers.filter(w => w.id !== id));
+  const handleDeleteWorker = async (id: string) => {
+    await deleteDocFromFirestore('workers', id);
   };
 
   const compressImage = (file: File): Promise<string> => {
@@ -221,7 +343,7 @@ export default function App() {
 
   const handleWorkerFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
 
     setIsExtractingWorker(true);
     try {
@@ -239,23 +361,25 @@ export default function App() {
       }
       
       if (Array.isArray(data) && data.length > 0) {
-        const detectedLines = data.map((item: any) => (item.line || newWorker.line || 'Chuyền 1').trim());
-        const uniqueNewLines = Array.from(new Set(detectedLines)).filter(l => !lines.includes(l));
-        
-        if (uniqueNewLines.length > 0) {
-          setLines([...lines, ...uniqueNewLines]);
-        }
+        for (const item of data) {
+          const lineName = (item.line || newWorker.line || 'Chuyền 1').trim();
+          if (!lines.includes(lineName)) {
+            await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
+              name: lineName,
+              userId: user.uid
+            });
+          }
 
-        const newWorkers = data.map((item: any) => ({
-          id: `w-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          name: item.name || 'Unhamed Worker',
-          code: item.code || 'CODE',
-          skills: item.skills ? (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : item.skills) : [],
-          line: (item.line || newWorker.line || 'Chuyền 1').trim(),
-          performance: 0
-        }));
-        setWorkers([...workers, ...newWorkers]);
-        alert(`Đã nhận diện và thêm ${newWorkers.length} công nhân thành công!`);
+          const worker = {
+            name: item.name || 'Unhamed Worker',
+            code: item.code || 'CODE',
+            skills: item.skills ? (typeof item.skills === 'string' ? item.skills.split(',').map((s: string) => s.trim()) : item.skills) : [],
+            line: lineName,
+            performance: 0
+          };
+          await addDocToFirestore('workers', worker);
+        }
+        alert(`Đã nhận diện và thêm ${data.length} công nhân thành công!`);
       } else {
         alert('Không tìm thấy dữ liệu công nhân trong hình ảnh.');
       }
@@ -268,27 +392,26 @@ export default function App() {
     }
   };
 
-  const handleAddOperation = () => {
+  const handleAddOperation = async () => {
     if (!newOperation.name || !newOperation.code) return;
-    const op: Operation = {
-      id: `op-${Date.now()}`,
+    const op = {
       name: newOperation.name,
       code: newOperation.code,
       style: newOperation.style,
       sam: Number(newOperation.sam),
       targetPerHour: Number(newOperation.target)
     };
-    setOperations([...operations, op]);
+    await addDocToFirestore('operations', op);
     setNewOperation({ name: '', code: '', style: '', sam: 0, target: 0 });
   };
 
-  const handleDeleteOperation = (id: string) => {
-    setOperations(operations.filter(op => op.id !== id));
+  const handleDeleteOperation = async (id: string) => {
+    await deleteDocFromFirestore('operations', id);
   };
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
-    if (!file) return;
+    if (!file || !user) return;
 
     setIsExtracting(true);
     try {
@@ -306,16 +429,17 @@ export default function App() {
       }
       
       if (Array.isArray(data) && data.length > 0) {
-        const newOps = data.map((item: any) => ({
-          id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-          name: item.name || 'Unhamed Operation',
-          code: item.code || 'CODE',
-          style: item.style || newOperation.style || '',
-          sam: Number(item.sam) || 0,
-          targetPerHour: Number(item.target) || 0
-        }));
-        setOperations([...operations, ...newOps]);
-        alert(`Đã nhận diện và thêm ${newOps.length} công đoạn thành công!`);
+        for (const item of data) {
+          const op = {
+            name: item.name || 'Unhamed Operation',
+            code: item.code || 'CODE',
+            style: item.style || newOperation.style || '',
+            sam: Number(item.sam) || 0,
+            targetPerHour: Number(item.target) || 0
+          };
+          await addDocToFirestore('operations', op);
+        }
+        alert(`Đã nhận diện và thêm ${data.length} công đoạn thành công!`);
       } else {
         alert('Không tìm thấy dữ liệu công đoạn trong hình ảnh.');
       }
@@ -328,10 +452,9 @@ export default function App() {
     }
   };
 
-  const handleAddOrder = () => {
+  const handleAddOrder = async () => {
     if (!newOrder.customer || !newOrder.style) return;
-    const order: ProductionOrder = {
-      id: `ord-${Date.now()}`,
+    const order = {
       customer: newOrder.customer,
       styleName: newOrder.style,
       job: newOrder.job,
@@ -340,15 +463,15 @@ export default function App() {
       deadline: newOrder.deadline,
       status: 'planning'
     };
-    setOrders([...orders, order]);
+    await addDocToFirestore('orders', order);
     setNewOrder({ customer: '', style: '', job: '', quantity: 0, deadline: '' });
   };
 
-  const handleDeleteOrder = (id: string) => {
-    setOrders(prev => prev.filter(o => o.id !== id));
+  const handleDeleteOrder = async (id: string) => {
+    await deleteDocFromFirestore('orders', id);
   };
 
-  const handleAddTimeStudyRecord = () => {
+  const handleAddTimeStudyRecord = async () => {
     const validTimes = [timeStudy.time1, timeStudy.time2, timeStudy.time3].filter(t => t > 0);
     if (validTimes.length === 0 || !timeStudy.workerId || !timeStudy.operationId) {
       alert("Vui lòng nhập đầy đủ thông tin!");
@@ -356,14 +479,11 @@ export default function App() {
     }
 
     const avgTimeObserved = validTimes.reduce((a, b) => a + b, 0) / validTimes.length;
-    // Apply 20% allowance for repairs, handling etc (tăng thêm 20%)
     const avgTimeAdjusted = avgTimeObserved * 1.2;
-    
     const outputPerHour = Math.round(3600 / avgTimeAdjusted);
     const outputPerDay = outputPerHour * 8;
 
-    const record: TimeStudyRecord = {
-      id: `ts-${Date.now()}`,
+    const record = {
       date: format(new Date(), 'yyyy-MM-dd HH:mm'),
       workerId: timeStudy.workerId,
       operationId: timeStudy.operationId,
@@ -374,13 +494,13 @@ export default function App() {
       targetPerDay: outputPerDay
     };
 
-    setTimeStudyRecords([record, ...timeStudyRecords]);
+    await addDocToFirestore('timeStudies', record);
     setTimeStudy({ ...timeStudy, time1: 0, time2: 0, time3: 0 });
     alert("Đã lưu kết quả nghiên cứu (đã cộng thêm 20% thời gian bù hao)!");
   };
 
-  const handleDeleteTimeStudyRecord = (id: string) => {
-    setTimeStudyRecords(timeStudyRecords.filter(r => r.id !== id));
+  const handleDeleteTimeStudyRecord = async (id: string) => {
+    await deleteDocFromFirestore('timeStudies', id);
   };
 
   // Sorting logic based on Line -> Order -> Operation -> Worker
@@ -525,12 +645,62 @@ export default function App() {
         <div className="flex items-center gap-4">
           <div className="hidden sm:block text-right">
             <p className="text-xs font-bold text-gray-400 uppercase tracking-widest">{format(new Date(), 'dd/MM/yyyy')}</p>
+            {user && <p className="text-[10px] text-indigo-600 font-bold">{user.email}</p>}
           </div>
-          <div className="h-8 w-8 rounded-full bg-indigo-50 border border-indigo-100 flex items-center justify-center text-indigo-600 font-bold text-xs">
-            OP
-          </div>
+          {user ? (
+            <button 
+              onClick={logOut}
+              className="px-3 py-1.5 rounded-xl bg-gray-100 text-gray-600 hover:bg-rose-50 hover:text-rose-600 transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
+              title="Đăng xuất"
+            >
+              <LogOut size={16} />
+              <span className="hidden md:inline">Đăng xuất</span>
+            </button>
+          ) : null}
         </div>
       </header>
+
+      {/* Auth Overlay */}
+      <AnimatePresence>
+        {!user && !loading && (
+          <motion.div 
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 z-[100] flex items-center justify-center bg-gray-900/40 backdrop-blur-sm p-4"
+          >
+            <motion.div 
+              initial={{ scale: 0.9, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              className="bg-white p-10 rounded-3xl shadow-2xl max-w-md w-full text-center space-y-8"
+            >
+              <div className="flex justify-center">
+                <div className="h-20 w-20 bg-indigo-600 rounded-[2.5rem] flex items-center justify-center shadow-2xl shadow-indigo-200 rotate-12">
+                  <Scissors className="text-white" size={40} />
+                </div>
+              </div>
+              <div>
+                <h2 className="text-3xl font-black text-gray-900 font-serif italic mb-2 tracking-tight">Chào mừng bạn!</h2>
+                <p className="text-gray-500 text-sm font-medium">Đăng nhập để lưu trữ dữ liệu sản xuất và đồng bộ trên mọi thiết bị.</p>
+              </div>
+              <button 
+                onClick={signInWithGoogle}
+                className="w-full py-4 px-6 rounded-2xl bg-white border-2 border-gray-100 hover:border-indigo-600 transition-all flex items-center justify-center gap-4 text-gray-700 font-black shadow-sm group"
+              >
+                <img src="https://www.google.com/favicon.ico" className="w-5 h-5 group-hover:scale-110 transition-transform" alt="Google" />
+                Tiếp tục với Google
+              </button>
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">Hệ thống quản lý sản xuất may mặc hiện đại</p>
+            </motion.div>
+          </motion.div>
+        )}
+
+        {loading && (
+          <motion.div className="fixed inset-0 z-[101] flex items-center justify-center bg-white">
+            <Loader2 className="animate-spin text-indigo-600" size={48} />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Main Content Area */}
       <main className="max-w-7xl mx-auto px-4 py-8">
