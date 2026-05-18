@@ -184,7 +184,7 @@ export default function App() {
 
   // Form States
   const [newLog, setNewLog] = useState({
-    line: lines[0] || 'Chuyền 1',
+    line: '',
     orderId: orders[0]?.id || '',
     actualQuantity: 0,
     date: format(new Date(), 'yyyy-MM-dd')
@@ -233,7 +233,7 @@ export default function App() {
     const qty = Number(actualQuantity);
 
     if (!line || !orderId || qty <= 0) {
-      alert("Vui lòng chọn đầy đủ Chuyền, Mã hàng và SL > 0!");
+      alert("Vui lòng nhập đầy đủ Chuyền, chọn Mã hàng và SL > 0!");
       return;
     }
 
@@ -639,7 +639,7 @@ export default function App() {
     { id: 'operations', label: 'Công đoạn', icon: Settings },
     { id: 'production', label: 'Sản lượng', icon: TrendingUp },
     { id: 'planning', label: 'Kế hoạch', icon: Calendar },
-    { id: 'timestudy', label: 'Bấm giờ SAM', icon: Clock },
+    { id: 'timestudy', label: 'Bấm thời gian', icon: Clock },
   ];
 
   const totalOrdered = orders.reduce((acc, order) => acc + order.orderQuantity, 0);
@@ -896,7 +896,7 @@ export default function App() {
                       className="p-3 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                     />
                     <input 
-                      placeholder="Kỹ năng"
+                      placeholder="Công đoạn"
                       value={newWorker.skills}
                       onChange={e => setNewWorker({...newWorker, skills: e.target.value})}
                       className="p-3 rounded-xl border border-gray-200 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
@@ -930,7 +930,7 @@ export default function App() {
                       <tr>
                         <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Mã CN</th>
                         <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Họ và Tên</th>
-                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Kỹ năng</th>
+                        <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Công đoạn</th>
                         <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Chuyền</th>
                         <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Thao tác</th>
                       </tr>
@@ -1134,14 +1134,14 @@ export default function App() {
 
                         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-end">
                            <div className="space-y-2">
-                             <label className="text-xs font-black uppercase text-gray-400 tracking-widest">1. Chọn Chuyền</label>
-                             <select 
+                             <label className="text-xs font-black uppercase text-gray-400 tracking-widest">1. Nhập Chuyền</label>
+                             <input 
+                               type="text"
+                               placeholder="Nhập tên chuyền..."
                                value={newLog.line}
                                onChange={(e) => setNewLog({ ...newLog, line: e.target.value })}
                                className="w-full p-4 rounded-xl border border-gray-200 focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-gray-50/50 text-sm font-bold"
-                             >
-                               {lines.map(l => <option key={l} value={l}>{l}</option>)}
-                             </select>
+                             />
                            </div>
 
                            <div className="space-y-2">
@@ -1481,7 +1481,7 @@ export default function App() {
                       <Clock size={24} />
                     </div>
                     <div>
-                      <h3 className="text-2xl font-bold font-serif italic text-gray-900">Nghiên cứu thời gian (SAM Case)</h3>
+                      <h3 className="text-2xl font-bold font-serif italic text-gray-900">Bấm thời gian</h3>
                       <p className="text-sm text-gray-500">Nhập thời gian đo thực tế để tính toán năng suất dự kiến</p>
                     </div>
                   </div>
@@ -1591,7 +1591,7 @@ export default function App() {
 
                   <div className="mt-12 border-t border-gray-100 pt-8">
                      <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-                        <h4 className="text-sm font-bold uppercase text-gray-400 tracking-widest">Lịch sử nghiên cứu SAM</h4>
+                        <h4 className="text-sm font-bold uppercase text-gray-400 tracking-widest">Lịch sử</h4>
                         <div className="flex items-center gap-3 flex-wrap">
                            <div className="flex items-center gap-2">
                              <span className="text-[10px] font-bold text-gray-400 uppercase">Chuyền:</span>
