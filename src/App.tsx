@@ -17,7 +17,8 @@ import {
   User as UserIcon,
   FileUp,
   Loader2,
-  LogIn
+  LogIn,
+  Trash2
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'motion/react';
 import { 
@@ -1313,6 +1314,63 @@ export default function App() {
                             })}
                         </tbody>
                       </table>
+                    </div>
+
+                    {/* Detailed Log History for Deletion */}
+                    <div className="mt-12 pt-8 border-t border-gray-100">
+                      <div className="flex items-center justify-between mb-6">
+                        <div>
+                          <h4 className="text-sm font-black uppercase text-gray-400 tracking-widest">Lịch sử nhập liệu chi tiết</h4>
+                          <p className="text-[10px] text-gray-400 font-bold mt-1">Dùng để kiểm tra và xoá các bản ghi nhập sai</p>
+                        </div>
+                      </div>
+                      
+                      <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                          <thead>
+                            <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">
+                              <th className="pb-4 px-2">Thời gian</th>
+                              <th className="pb-4 px-2">Chuyền</th>
+                              <th className="pb-4 px-2">Mã hàng</th>
+                              <th className="pb-4 px-2 text-center">Số lượng</th>
+                              <th className="pb-4 px-2 text-right">Thao tác</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50">
+                            {logs
+                              .filter(l => {
+                                const matchDate = !prodFilterDate || l.date === prodFilterDate;
+                                const matchLine = !prodFilterLine || l.line === prodFilterLine;
+                                const matchOrder = !prodFilterOrder || l.orderId === prodFilterOrder;
+                                return matchDate && matchLine && matchOrder;
+                              })
+                              .sort((a, b) => b.id.localeCompare(a.id)) // Rough sort by id
+                              .slice(0, 50) // Show last 50 entries
+                              .map((log) => {
+                                const order = orders.find(o => o.id === log.orderId);
+                                return (
+                                  <tr key={log.id} className="hover:bg-rose-50/30 transition-colors">
+                                    <td className="py-4 px-2">
+                                      <p className="text-xs font-bold text-gray-600">{log.date}</p>
+                                    </td>
+                                    <td className="py-4 px-2 text-xs font-bold text-gray-900">{log.line}</td>
+                                    <td className="py-4 px-2 text-xs font-bold text-indigo-900">{order?.styleName}</td>
+                                    <td className="py-4 px-2 text-center font-mono font-black text-indigo-600">{log.actualQuantity}</td>
+                                    <td className="py-4 px-2 text-right">
+                                      <button 
+                                        onClick={() => handleDeleteLog(log.id)}
+                                        className="p-2 text-gray-400 hover:text-rose-500 transition-colors"
+                                        title="Xoá bản ghi"
+                                      >
+                                        <Trash2 size={16} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                          </tbody>
+                        </table>
+                      </div>
                     </div>
                  </div>
               </motion.div>
