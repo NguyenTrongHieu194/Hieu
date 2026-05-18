@@ -341,6 +341,21 @@ export default function App() {
     });
   };
 
+  const handleSignIn = async () => {
+    try {
+      await signInWithGoogle();
+    } catch (error: any) {
+      console.error("Login Error:", error);
+      if (error.code === 'auth/popup-blocked') {
+        alert("Trình duyệt đã chặn cửa sổ bật lên. Vui lòng cho phép hiện cửa sổ bật lên hoặc thử mở ứng dụng trong tab mới (nút 'Open in new tab' ở góc trên bên phải).");
+      } else if (error.code === 'auth/unauthorized-domain') {
+        alert("Tên miền này chưa được cấp phép trong Firebase Console. Nếu bạn đang chạy trên Vercel, hãy thêm domain của bạn vào 'Authorized Domains' trong phần Authentication -> Settings của Firebase.");
+      } else {
+        alert("Lỗi đăng nhập: " + error.message);
+      }
+    }
+  };
+
   const handleWorkerFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !user) return;
@@ -684,7 +699,7 @@ export default function App() {
                 <p className="text-gray-500 text-sm font-medium">Đăng nhập để lưu trữ dữ liệu sản xuất và đồng bộ trên mọi thiết bị.</p>
               </div>
               <button 
-                onClick={signInWithGoogle}
+                onClick={handleSignIn}
                 className="w-full py-4 px-6 rounded-2xl bg-white border-2 border-gray-100 hover:border-indigo-600 transition-all flex items-center justify-center gap-4 text-gray-700 font-black shadow-sm group"
               >
                 <img src="https://www.google.com/favicon.ico" className="w-5 h-5 group-hover:scale-110 transition-transform" alt="Google" />
