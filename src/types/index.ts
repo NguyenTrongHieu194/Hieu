@@ -11,6 +11,7 @@ export interface Operation {
   id: string;
   name: string;
   code: string;
+  style?: string; // Mã hàng liên kết
   sam: number; // Standard Allowed Minutes
   targetPerHour: number;
 }

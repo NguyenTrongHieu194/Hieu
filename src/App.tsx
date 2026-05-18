@@ -57,6 +57,7 @@ export default function App() {
   // UI State
   const [newLineName, setNewLineName] = useState('');
   const [workerFilterLine, setWorkerFilterLine] = useState('');
+  const [opFilterStyle, setOpFilterStyle] = useState('');
   const [tsFilterLine, setTsFilterLine] = useState('');
   const [tsFilterOrder, setTsFilterOrder] = useState('');
 
@@ -79,7 +80,7 @@ export default function App() {
   });
 
   const [newWorker, setNewWorker] = useState({ name: '', code: '', skills: '', line: '' });
-  const [newOperation, setNewOperation] = useState({ name: '', code: '', sam: 0, target: 0 });
+  const [newOperation, setNewOperation] = useState({ name: '', code: '', style: '', sam: 0, target: 0 });
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExtractingWorker, setIsExtractingWorker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -273,11 +274,12 @@ export default function App() {
       id: `op-${Date.now()}`,
       name: newOperation.name,
       code: newOperation.code,
+      style: newOperation.style,
       sam: Number(newOperation.sam),
       targetPerHour: Number(newOperation.target)
     };
     setOperations([...operations, op]);
-    setNewOperation({ name: '', code: '', sam: 0, target: 0 });
+    setNewOperation({ name: '', code: '', style: '', sam: 0, target: 0 });
   };
 
   const handleDeleteOperation = (id: string) => {
@@ -308,6 +310,7 @@ export default function App() {
           id: `op-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           name: item.name || 'Unhamed Operation',
           code: item.code || 'CODE',
+          style: item.style || newOperation.style || '',
           sam: Number(item.sam) || 0,
           targetPerHour: Number(item.target) || 0
         }));
@@ -823,7 +826,7 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+                  <div className="grid grid-cols-1 md:grid-cols-6 gap-4">
                     <input 
                       placeholder="Tên công đoạn"
                       value={newOperation.name}
@@ -834,6 +837,12 @@ export default function App() {
                       placeholder="Mã CĐ"
                       value={newOperation.code}
                       onChange={e => setNewOperation({...newOperation, code: e.target.value})}
+                      className="p-3 rounded-xl border border-gray-200 text-sm outline-none"
+                    />
+                    <input 
+                      placeholder="Mã hàng / Style"
+                      value={newOperation.style}
+                      onChange={e => setNewOperation({...newOperation, style: e.target.value})}
                       className="p-3 rounded-xl border border-gray-200 text-sm outline-none"
                     />
                     <input 
@@ -859,9 +868,37 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 mb-6">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold text-gray-400 uppercase tracking-widest">Bộ lọc theo mã hàng:</span>
+                    <select 
+                      value={opFilterStyle}
+                      onChange={(e) => setOpFilterStyle(e.target.value)}
+                      className="text-sm p-2 px-4 rounded-xl border border-gray-200 bg-gray-50 outline-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                    >
+                      <option value="">Tất cả mã hàng</option>
+                      {Array.from(new Set(operations.map(op => op.style).filter(Boolean))).map(style => (
+                        <option key={style} value={style}>{style}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="text-xs text-gray-400">
+                    Sản lượng đang may: <span className="font-bold text-indigo-600">{operations.filter(op => !opFilterStyle || op.style === opFilterStyle).length}</span> công đoạn
+                  </div>
+                </div>
+
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {operations.map((op) => (
-                    <div key={op.id} className="bg-white p-6 rounded-2xl border border-gray-100 hover:border-indigo-300 transition-all shadow-sm group">
+                  {operations
+                    .filter(op => !opFilterStyle || op.style === opFilterStyle)
+                    .map((op) => (
+                    <div key={op.id} className="bg-white p-6 rounded-2xl border border-gray-100 hover:border-indigo-300 transition-all shadow-sm group relative">
+                      {op.style && (
+                        <div className="absolute top-4 right-14">
+                          <span className="bg-indigo-50 text-indigo-600 text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-tighter">
+                            Style: {op.style}
+                          </span>
+                        </div>
+                      )}
                       <div className="flex justify-between items-start mb-4">
                         <div className="h-10 w-10 rounded-xl bg-orange-50 text-orange-600 flex items-center justify-center font-bold text-xs uppercase">
                           {op.code}

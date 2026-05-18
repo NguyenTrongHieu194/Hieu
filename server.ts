@@ -45,10 +45,11 @@ async function startServer() {
         Extract the following information for EACH operation found:
         - name: The name of the operation
         - code: The unique code for the operation
+        - style: The style name or code (Mã hàng) if present in the document.
         - sam: Standard Allowed Minutes (a number)
         - target: Target per hour (a number)
 
-        Return ONLY a JSON array of objects with these keys: name, code, sam, target.
+        Return ONLY a JSON array of objects with these keys: name, code, style, sam, target.
       `;
 
       const result = await ai.models.generateContent({
@@ -73,6 +74,7 @@ async function startServer() {
               properties: {
                 name: { type: Type.STRING },
                 code: { type: Type.STRING },
+                style: { type: Type.STRING },
                 sam: { type: Type.NUMBER },
                 target: { type: Type.NUMBER },
               },
