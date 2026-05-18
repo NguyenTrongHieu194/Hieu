@@ -12,8 +12,17 @@ async function startServer() {
 
   app.use(express.json({ limit: "50mb" }));
 
+  // API Key initialization
+  // NOTE: If deploying to Vercel or other platforms, you MUST set GEMINI_API_KEY 
+  // in your environment variables/secrets.
+  const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+  if (!GEMINI_API_KEY) {
+    console.warn("WARNING: GEMINI_API_KEY is not set in environment variables.");
+  }
+
   const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: GEMINI_API_KEY || "",
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -23,6 +32,10 @@ async function startServer() {
 
   // API Route for AI Extraction - Operations
   app.post("/api/extract-operation", async (req, res) => {
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: "GEMINI_API_KEY chưa được thiết lập trên máy chủ. Vui lòng kiểm tra cấu hình biến môi trường." });
+    }
+    
     try {
       const { image, mimeType } = req.body;
 
@@ -53,7 +66,7 @@ async function startServer() {
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-1.5-flash",
         contents: [{
           parts: [
             { text: prompt },
@@ -78,11 +91,15 @@ async function startServer() {
                 sam: { type: Type.NUMBER },
                 target: { type: Type.NUMBER },
               },
-              required: ["name", "code", "sam", "target"],
+              required: ["name"],
             },
           },
         }
       });
+
+      if (!result || !result.text) {
+        return res.status(500).json({ error: "Mô hình AI không trả về nội dung. Có thể nội dung bị chặn do chính sách an toàn hoặc ảnh không hợp lệ." });
+      }
 
       let text = result.text || "[]";
       if (typeof text === 'string') {
@@ -123,6 +140,10 @@ async function startServer() {
 
   // API Route for AI Extraction - Workers
   app.post("/api/extract-worker", async (req, res) => {
+    if (!GEMINI_API_KEY) {
+      return res.status(500).json({ error: "GEMINI_API_KEY chưa được thiết lập trên máy chủ. Vui lòng kiểm tra cấu hình biến môi trường." });
+    }
+    
     try {
       const { image, mimeType } = req.body;
 
@@ -152,7 +173,7 @@ async function startServer() {
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-1.5-flash",
         contents: [{
           parts: [
             { text: prompt },
@@ -173,14 +194,19 @@ async function startServer() {
               properties: {
                 name: { type: Type.STRING },
                 code: { type: Type.STRING },
+                style: { type: Type.STRING },
                 line: { type: Type.STRING },
                 skills: { type: Type.STRING },
               },
-              required: ["name", "code", "line", "skills"],
+              required: ["name"],
             },
           },
         }
       });
+
+      if (!result || !result.text) {
+        return res.status(500).json({ error: "Mô hình AI không trả về nội dung. Có thể nội dung bị chặn do chính sách an toàn hoặc ảnh không hợp lệ." });
+      }
 
       let text = result.text || "[]";
       if (typeof text === 'string') {
@@ -237,6 +263,8 @@ async function startServer() {
   app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://localhost:${PORT}`);
   });
+
+  return app;
 }
 
-startServer();
+export const app = startServer();
