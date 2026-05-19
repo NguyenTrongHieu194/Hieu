@@ -276,7 +276,14 @@ export default function App() {
   };
 
   const handleAddWorker = async () => {
-    if (!newWorker.name || !newWorker.code || !user) return;
+    if (!user) return;
+    
+    const hasAnyField = 
+      newWorker.name.trim() || 
+      newWorker.code.trim() || 
+      newWorker.skills.trim();
+
+    if (!hasAnyField) return;
     
     // Add to lines if not exists
     const lineName = newWorker.line.trim() || 'Chuyền 1';
@@ -288,9 +295,9 @@ export default function App() {
     }
 
     const worker = {
-      name: newWorker.name,
-      code: newWorker.code,
-      skills: newWorker.skills.split(',').map(s => s.trim()),
+      name: newWorker.name.trim() || 'Chưa đặt tên',
+      code: newWorker.code.trim() || '-',
+      skills: newWorker.skills ? newWorker.skills.split(',').map(s => s.trim()) : [],
       line: lineName,
       performance: 0
     };
@@ -494,13 +501,21 @@ export default function App() {
   };
 
   const handleAddOperation = async () => {
-    if (!newOperation.name || !newOperation.code) return;
+    const hasAnyField = 
+      newOperation.name.trim() || 
+      newOperation.code.trim() || 
+      newOperation.style.trim() || 
+      newOperation.sam > 0 || 
+      newOperation.target > 0;
+
+    if (!hasAnyField) return;
+
     const op = {
-      name: newOperation.name,
-      code: newOperation.code,
-      style: newOperation.style,
-      sam: Number(newOperation.sam),
-      targetPerHour: Number(newOperation.target)
+      name: newOperation.name.trim() || 'Chưa đặt tên',
+      code: newOperation.code.trim() || '-',
+      style: newOperation.style.trim() || '',
+      sam: Number(newOperation.sam) || 0,
+      targetPerHour: Number(newOperation.target) || 0
     };
     await addDocToFirestore('operations', op);
     setNewOperation({ name: '', code: '', style: '', sam: 0, target: 0 });
