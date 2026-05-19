@@ -13,7 +13,7 @@ async function startServer() {
   app.use(express.json({ limit: "50mb" }));
 
   const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY,
+    apiKey: process.env.GEMINI_API_KEY || "DUMMY_KEY",
     httpOptions: {
       headers: {
         'User-Agent': 'aistudio-build',
@@ -21,8 +21,17 @@ async function startServer() {
     }
   });
 
+  if (!process.env.GEMINI_API_KEY) {
+    console.warn("WARNING: GEMINI_API_KEY is not set in environment variables. AI features will fail.");
+  }
+
   // API Route for AI Extraction - Operations
   app.post("/api/extract-operation", async (req, res) => {
+    console.log("POST /api/extract-operation - Request received");
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("AI Error: GEMINI_API_KEY is missing from environment");
+      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên máy chủ." });
+    }
     try {
       const { image, mimeType } = req.body;
 
@@ -53,7 +62,7 @@ async function startServer() {
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-3-flash-preview",
         contents: [{
           parts: [
             { text: prompt },
@@ -123,6 +132,11 @@ async function startServer() {
 
   // API Route for AI Extraction - Workers
   app.post("/api/extract-worker", async (req, res) => {
+    console.log("POST /api/extract-worker - Request received");
+    if (!process.env.GEMINI_API_KEY) {
+      console.error("AI Error: GEMINI_API_KEY is missing from environment");
+      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên máy chủ." });
+    }
     try {
       const { image, mimeType } = req.body;
 
@@ -152,7 +166,7 @@ async function startServer() {
       `;
 
       const result = await ai.models.generateContent({
-        model: "gemini-flash-latest",
+        model: "gemini-3-flash-preview",
         contents: [{
           parts: [
             { text: prompt },

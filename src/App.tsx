@@ -433,11 +433,26 @@ export default function App() {
 
     setIsExtractingWorker(true);
     try {
-      const base64 = await compressImage(file);
+      let base64 = '';
+      let mimeType = 'image/jpeg';
+
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        const reader = new FileReader();
+        base64 = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        mimeType = 'application/pdf';
+      } else {
+        base64 = await compressImage(file);
+        mimeType = 'image/jpeg';
+      }
+
       const response = await fetch('/api/extract-worker', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mimeType: 'image/jpeg' })
+        body: JSON.stringify({ image: base64, mimeType })
       });
       
       const data = await response.json();
@@ -575,11 +590,26 @@ export default function App() {
 
     setIsExtracting(true);
     try {
-      const base64 = await compressImage(file);
+      let base64 = '';
+      let mimeType = 'image/jpeg';
+
+      if (file.type === 'application/pdf' || file.name.endsWith('.pdf')) {
+        const reader = new FileReader();
+        base64 = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve((reader.result as string).split(',')[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        mimeType = 'application/pdf';
+      } else {
+        base64 = await compressImage(file);
+        mimeType = 'image/jpeg';
+      }
+
       const response = await fetch('/api/extract-operation', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: base64, mimeType: 'image/jpeg' })
+        body: JSON.stringify({ image: base64, mimeType })
       });
       
       const data = await response.json();
