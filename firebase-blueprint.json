@@ -93,14 +93,14 @@
         "date": { "type": "string", "format": "date" },
         "workerId": { "type": "string" },
         "operationId": { "type": "string" },
-        "orderId": { "type": "string" },
+        "style": { "type": "string" },
         "times": { "type": "array", "items": { "type": "number" } },
         "averageTime": { "type": "number" },
         "targetPerHour": { "type": "number" },
         "targetPerDay": { "type": "number" },
         "userId": { "type": "string" }
       },
-      "required": ["date", "workerId", "operationId", "orderId", "times", "userId"]
+      "required": ["date", "workerId", "operationId", "style", "times", "userId"]
     }
   },
   "firestore": {

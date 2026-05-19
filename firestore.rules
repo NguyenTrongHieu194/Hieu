@@ -6,6 +6,10 @@ service cloud.firestore {
       allow read, write: if false;
     }
 
+    match /test/connection {
+      allow read: if true;
+    }
+
     // --- Helper Functions ---
     function isSignedIn() {
       return request.auth != null;
@@ -79,7 +83,7 @@ service cloud.firestore {
     }
 
     function isValidTimeStudyRecord(data, userId) {
-      return data.keys().hasAll(['date', 'workerId', 'operationId', 'orderId', 'times', 'userId']) &&
+      return data.keys().hasAll(['date', 'workerId', 'operationId', 'style', 'times', 'userId']) &&
              data.keys().size() <= 20 &&
              data.userId == userId &&
              data.times is list && data.times.size() <= 100;

@@ -62,10 +62,57 @@ import {
 
 type Tab = 'dashboard' | 'workers' | 'operations' | 'production' | 'planning' | 'timestudy';
 
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId?: string | null;
+    email?: string | null;
+    emailVerified?: boolean | null;
+    isAnonymous?: boolean | null;
+  }
+}
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>('dashboard');
   const [user, setUser] = useState<FirebaseUser | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const handleFirestoreError = (error: unknown, operationType: OperationType, path: string | null) => {
+    const errInfo: FirestoreErrorInfo = {
+      error: error instanceof Error ? error.message : String(error),
+      authInfo: {
+        userId: auth.currentUser?.uid,
+        email: auth.currentUser?.email,
+        emailVerified: auth.currentUser?.emailVerified,
+        isAnonymous: auth.currentUser?.isAnonymous,
+      },
+      operationType,
+      path
+    };
+    console.error('Firestore Error: ', JSON.stringify(errInfo));
+    // Always show alert for debugging
+    const vietnameseOp = {
+      [OperationType.WRITE]: 'ghi',
+      [OperationType.CREATE]: 'tạo',
+      [OperationType.UPDATE]: 'cập nhật',
+      [OperationType.DELETE]: 'xóa',
+      [OperationType.LIST]: 'tải danh sách',
+      [OperationType.GET]: 'lấy dữ liệu',
+    }[operationType] || operationType;
+
+    alert(`Lỗi hệ thống khi ${vietnameseOp} dữ liệu: ${errInfo.error}`);
+  };
 
   // Persistence State
   const [lines, setLines] = useState<string[]>([]);
@@ -102,27 +149,27 @@ export default function App() {
     const unsubLines = onSnapshot(collection(db, `${userPath}/lines`), (snap) => {
       const data = snap.docs.map(d => d.data().name as string);
       setLines(data.length > 0 ? data : ['Chuyền 1', 'Chuyền 2', 'Chuyền 3']);
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `${userPath}/lines`));
 
     const unsubWorkers = onSnapshot(collection(db, `${userPath}/workers`), (snap) => {
       setWorkers(snap.docs.map(d => ({ id: d.id, ...d.data() } as Worker)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `${userPath}/workers`));
 
     const unsubOps = onSnapshot(collection(db, `${userPath}/operations`), (snap) => {
       setOperations(snap.docs.map(d => ({ id: d.id, ...d.data() } as Operation)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `${userPath}/operations`));
 
     const unsubOrders = onSnapshot(collection(db, `${userPath}/orders`), (snap) => {
       setOrders(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionOrder)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `${userPath}/orders`));
 
     const unsubLogs = onSnapshot(collection(db, `${userPath}/productionLogs`), (snap) => {
       setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() } as ProductionLog)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `${userPath}/productionLogs`));
 
     const unsubTS = onSnapshot(collection(db, `${userPath}/timeStudies`), (snap) => {
       setTimeStudyRecords(snap.docs.map(d => ({ id: d.id, ...d.data() } as TimeStudyRecord)));
-    });
+    }, (err) => handleFirestoreError(err, OperationType.LIST, `${userPath}/timeStudies`));
 
     return () => {
       unsubLines();
@@ -137,33 +184,35 @@ export default function App() {
   // Firestore Helpers
   const addDocToFirestore = async (col: string, data: any) => {
     if (!user) return;
+    const path = `users/${user.uid}/${col}`;
     try {
-      await addDoc(collection(db, `users/${user.uid}/${col}`), {
+      await addDoc(collection(db, path), {
         ...data,
         userId: user.uid,
         createdAt: Timestamp.now()
       });
     } catch (e) {
-      console.error(e);
-      alert("Lỗi khi lưu dữ liệu lên đám mây.");
+      handleFirestoreError(e, OperationType.WRITE, path);
     }
   };
 
   const deleteDocFromFirestore = async (col: string, id: string) => {
     if (!user) return;
+    const path = `users/${user.uid}/${col}/${id}`;
     try {
       await deleteDoc(doc(db, `users/${user.uid}/${col}`, id));
     } catch (e) {
-      console.error(e);
+      handleFirestoreError(e, OperationType.DELETE, path);
     }
   };
 
   const updateDocInFirestore = async (col: string, id: string, data: any) => {
     if (!user) return;
+    const path = `users/${user.uid}/${col}/${id}`;
     try {
       await updateDoc(doc(db, `users/${user.uid}/${col}`, id), data);
     } catch (e) {
-      console.error(e);
+      handleFirestoreError(e, OperationType.UPDATE, path);
     }
   };
 
@@ -172,11 +221,12 @@ export default function App() {
   const [workerFilterLine, setWorkerFilterLine] = useState('');
   const [opFilterStyle, setOpFilterStyle] = useState('');
   const [tsFilterLine, setTsFilterLine] = useState('');
-  const [tsFilterOrder, setTsFilterOrder] = useState('');
+  const [tsFilterStyle, setTsFilterStyle] = useState('');
+  const [tsSelectedStyle, setTsSelectedStyle] = useState('');
+  const [tsSelectedLine, setTsSelectedLine] = useState('');
 
   // Time Study State
   const [timeStudy, setTimeStudy] = useState({
-    orderId: '',
     workerId: '',
     operationId: '',
     time1: 0,
@@ -678,8 +728,8 @@ export default function App() {
 
   const handleAddTimeStudyRecord = async () => {
     const validTimes = [timeStudy.time1, timeStudy.time2, timeStudy.time3].filter(t => t > 0);
-    if (validTimes.length === 0 || !timeStudy.workerId || !timeStudy.operationId) {
-      alert("Vui lòng nhập đầy đủ thông tin!");
+    if (validTimes.length === 0 || !timeStudy.workerId || !timeStudy.operationId || !tsSelectedStyle) {
+      alert("Vui lòng nhập đầy đủ thông tin (chọn mã hàng, công đoạn, công nhân và các lần đo)!");
       return;
     }
 
@@ -692,15 +742,16 @@ export default function App() {
       date: format(new Date(), 'yyyy-MM-dd HH:mm'),
       workerId: timeStudy.workerId,
       operationId: timeStudy.operationId,
-      orderId: timeStudy.orderId,
       times: validTimes,
       averageTime: Number(avgTimeAdjusted.toFixed(2)),
       targetPerHour: outputPerHour,
-      targetPerDay: outputPerDay
+      targetPerDay: outputPerDay,
+      style: tsSelectedStyle // Store style name directly for reliability
     };
 
     await addDocToFirestore('timeStudies', record);
     setTimeStudy({ ...timeStudy, time1: 0, time2: 0, time3: 0 });
+    setTsSelectedLine('');
     alert("Đã lưu kết quả nghiên cứu (đã cộng thêm 20% thời gian bù hao)!");
   };
 
@@ -758,16 +809,16 @@ export default function App() {
     return [...timeStudyRecords].sort((a, b) => {
       const workerA = workers.find(w => w.id === a.workerId);
       const workerB = workers.find(w => w.id === b.workerId);
-      const orderA = orders.find(o => o.id === a.orderId);
-      const orderB = orders.find(o => o.id === b.orderId);
       const opA = operations.find(o => o.id === a.operationId);
       const opB = operations.find(o => o.id === b.operationId);
 
       const lineCompare = (workerA?.line || "").localeCompare(workerB?.line || "");
       if (lineCompare !== 0) return lineCompare;
 
-      const orderCompare = (orderA?.styleName || "").localeCompare(orderB?.styleName || "");
-      if (orderCompare !== 0) return orderCompare;
+      const styleA = a.style || opA?.style || "";
+      const styleB = b.style || opB?.style || "";
+      const styleCompare = styleA.localeCompare(styleB);
+      if (styleCompare !== 0) return styleCompare;
 
       return (opA?.name || "").localeCompare(opB?.name || "");
     });
@@ -1738,38 +1789,66 @@ export default function App() {
                     <div className="space-y-6 bg-gray-50/50 p-6 rounded-2xl">
                        <div className="space-y-4">
                           <div>
-                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">1. Mã hàng / Đơn hàng</label>
+                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">1. Mã hàng</label>
                             <select 
-                              value={timeStudy.orderId}
-                              onChange={e => setTimeStudy({...timeStudy, orderId: e.target.value})}
+                              value={tsSelectedStyle}
+                              onChange={e => {
+                                setTsSelectedStyle(e.target.value);
+                                setTimeStudy({...timeStudy, operationId: ''});
+                              }}
                               className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                             >
-                              <option value="">-- Chọn đơn hàng --</option>
-                              {orders.map(o => <option key={o.id} value={o.id}>{o.styleName} ({o.customer})</option>)}
+                              <option value="">-- Chọn mã hàng --</option>
+                              {Array.from(new Set(operations.map(o => o.style).filter(Boolean))).sort().map(s => (
+                                <option key={s} value={s}>{s}</option>
+                              ))}
                             </select>
                           </div>
 
                           <div>
-                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">2. Công nhân & Chuyền</label>
-                            <select 
-                              value={timeStudy.workerId}
-                              onChange={e => setTimeStudy({...timeStudy, workerId: e.target.value})}
-                              className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-                            >
-                              <option value="">-- Chọn công nhân --</option>
-                              {workers.map(w => <option key={w.id} value={w.id}>{w.name} - {w.line}</option>)}
-                            </select>
-                          </div>
-
-                          <div>
-                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">3. Công đoạn</label>
+                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">2. Công đoạn</label>
                             <select 
                               value={timeStudy.operationId}
                               onChange={e => setTimeStudy({...timeStudy, operationId: e.target.value})}
+                              disabled={!tsSelectedStyle}
+                              className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 italic"
+                            >
+                              <option value="">{tsSelectedStyle ? '-- Chọn công đoạn --' : '-- Vui lòng chọn mã hàng trước --'}</option>
+                              {operations
+                                .filter(o => o.style === tsSelectedStyle)
+                                .map(o => <option key={o.id} value={o.id}>{o.name} ({o.code})</option>)
+                              }
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">3. Chuyền</label>
+                            <select 
+                              value={tsSelectedLine}
+                              onChange={e => {
+                                setTsSelectedLine(e.target.value);
+                                setTimeStudy({...timeStudy, workerId: ''});
+                              }}
                               className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                             >
-                              <option value="">-- Chọn công đoạn --</option>
-                              {operations.map(o => <option key={o.id} value={o.id}>{o.name}</option>)}
+                              <option value="">-- Chọn chuyền --</option>
+                              {lines.map(l => <option key={l} value={l}>{l}</option>)}
+                            </select>
+                          </div>
+
+                          <div>
+                            <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">4. Công nhân</label>
+                            <select 
+                              value={timeStudy.workerId}
+                              onChange={e => setTimeStudy({...timeStudy, workerId: e.target.value})}
+                              disabled={!tsSelectedLine}
+                              className="w-full p-3 rounded-xl border border-gray-200 bg-white text-sm outline-none focus:ring-2 focus:ring-indigo-500 disabled:bg-gray-100 italic"
+                            >
+                              <option value="">{tsSelectedLine ? '-- Chọn công nhân --' : '-- Vui lòng chọn chuyền trước --'}</option>
+                              {workers
+                                .filter(w => w.line === tsSelectedLine)
+                                .map(w => <option key={w.id} value={w.id}>{w.name} ({w.code})</option>)
+                              }
                             </select>
                           </div>
                        </div>
@@ -1777,7 +1856,7 @@ export default function App() {
 
                     {/* Right: Time Measure Inputs */}
                     <div className="space-y-6">
-                       <label className="text-xs font-bold uppercase text-gray-400 tracking-widest block">4. Kết quả đo (Giây)</label>
+                       <label className="text-xs font-bold uppercase text-gray-400 tracking-widest block">5. Kết quả đo (Giây)</label>
                        <div className="grid grid-cols-3 gap-4">
                           {['time1', 'time2', 'time3'].map((key, i) => (
                             <div key={key} className="space-y-2">
@@ -1854,12 +1933,17 @@ export default function App() {
                            <div className="flex items-center gap-2">
                              <span className="text-[10px] font-bold text-gray-400 uppercase">Mã hàng:</span>
                              <select 
-                               value={tsFilterOrder}
-                               onChange={(e) => setTsFilterOrder(e.target.value)}
+                               value={tsFilterStyle}
+                               onChange={(e) => setTsFilterStyle(e.target.value)}
                                className="text-xs p-2 rounded-lg border border-gray-200 bg-white"
                              >
                                <option value="">Tất cả</option>
-                               {orders.map(o => <option key={o.id} value={o.id}>{o.styleName}</option>)}
+                               {Array.from(new Set(timeStudyRecords.map(r => {
+                                 const op = operations.find(o => o.id === r.operationId);
+                                 return r.style || op?.style || '';
+                               }).filter(Boolean))).sort().map(s => (
+                                 <option key={s} value={s}>{s}</option>
+                               ))}
                              </select>
                            </div>
                         </div>
@@ -1868,14 +1952,15 @@ export default function App() {
                         {getSortedTimeStudyRecords()
                           .filter(record => {
                             const worker = workers.find(w => w.id === record.workerId);
+                            const op = operations.find(o => o.id === record.operationId);
                             const lineMatch = !tsFilterLine || worker?.line === tsFilterLine;
-                            const orderMatch = !tsFilterOrder || record.orderId === tsFilterOrder;
-                            return lineMatch && orderMatch;
+                            const styleMatch = !tsFilterStyle || record.style === tsFilterStyle || op?.style === tsFilterStyle;
+                            return lineMatch && styleMatch;
                           })
                           .map((record) => {
                           const worker = workers.find(w => w.id === record.workerId);
                           const op = operations.find(o => o.id === record.operationId);
-                          const order = orders.find(o => o.id === record.orderId);
+                          const styleName = record.style || op?.style || 'Không rõ mã hàng';
                           return (
                             <div key={record.id} className="bg-gray-50/50 p-6 rounded-2xl border border-gray-100 flex items-center justify-between group hover:border-indigo-200 transition-all">
                                <div className="flex items-center gap-6">
@@ -1888,7 +1973,7 @@ export default function App() {
                                         <span className="bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">{worker?.line}</span>
                                         <p className="text-sm font-bold text-gray-900">{op?.name} • {worker?.name}</p>
                                      </div>
-                                     <p className="text-[10px] text-gray-400 font-semibold">{order?.styleName || 'Không rõ mã hàng'} • {record.date}</p>
+                                     <p className="text-[10px] text-gray-400 font-semibold">{styleName} • {record.date}</p>
                                   </div>
                                </div>
                                <div className="flex items-center gap-8">

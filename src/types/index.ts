@@ -44,7 +44,7 @@ export interface TimeStudyRecord {
   date: string;
   workerId: string;
   operationId: string;
-  orderId: string;
+  style: string;
   times: number[];
   averageTime: number;
   targetPerHour: number;
