@@ -46,6 +46,7 @@ import {
 } from 'firebase/firestore';
 import { Worker, Operation, ProductionOrder, ProductionLog, TimeStudyRecord } from './types';
 import { format } from 'date-fns';
+import * as XLSX from 'xlsx';
 import { 
   BarChart, 
   Bar, 
@@ -361,6 +362,75 @@ export default function App() {
     const file = event.target.files?.[0];
     if (!file || !user) return;
 
+    // Direct Excel Parsing Support
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const data = e.target?.result;
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const json: any[] = XLSX.utils.sheet_to_json(worksheet);
+          
+          let count = 0;
+          for (const item of json) {
+            // Normalize keys to lowercase for easier matching
+            const normalizedItem: any = {};
+            Object.keys(item).forEach(key => {
+              normalizedItem[key.toLowerCase().trim()] = item[key];
+            });
+
+            const lineName = (
+              normalizedItem.line || 
+              normalizedItem['chuyền'] || 
+              normalizedItem['tổ'] || 
+              'Chuyền 1'
+            ).toString().trim();
+
+            if (!lines.includes(lineName)) {
+              await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
+                name: lineName,
+                userId: user.uid
+              });
+            }
+
+            const worker = {
+              name: (
+                normalizedItem.name || 
+                normalizedItem['họ và tên'] || 
+                normalizedItem['tên'] || 
+                normalizedItem['họ tên'] ||
+                'Unnamed Worker'
+              ).toString().trim(),
+              code: (
+                normalizedItem.code || 
+                normalizedItem['mã cn'] || 
+                normalizedItem['mã'] || 
+                normalizedItem['mã nhân viên'] ||
+                'CODE'
+              ).toString().trim(),
+              skills: normalizedItem.skills 
+                ? (typeof normalizedItem.skills === 'string' ? normalizedItem.skills.split(',').map((s: string) => s.trim()) : [normalizedItem.skills.toString()]) 
+                : (normalizedItem['công đoạn'] || normalizedItem['kỹ năng'] ? [(normalizedItem['công đoạn'] || normalizedItem['kỹ năng']).toString()] : []),
+              line: lineName,
+              performance: 0
+            };
+            await addDocToFirestore('workers', worker);
+            count++;
+          }
+          alert(`Đã nhập thành công ${count} công nhân từ Excel!`);
+        } catch (err) {
+          console.error(err);
+          alert("Lỗi khi đọc file Excel. Vui lòng kiểm tra định dạng.");
+        } finally {
+          if (workerFileInputRef.current) workerFileInputRef.current.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
     setIsExtractingWorker(true);
     try {
       const base64 = await compressImage(file);
@@ -428,6 +498,80 @@ export default function App() {
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file || !user) return;
+
+    // Direct Excel Parsing Support
+    if (file.name.endsWith('.xlsx') || file.name.endsWith('.xls')) {
+      const reader = new FileReader();
+      reader.onload = async (e) => {
+        try {
+          const data = e.target?.result;
+          const workbook = XLSX.read(data, { type: 'array' });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const json: any[] = XLSX.utils.sheet_to_json(worksheet);
+          
+          let count = 0;
+          for (const item of json) {
+            // Normalize keys to lowercase for easier matching
+            const normalizedItem: any = {};
+            Object.keys(item).forEach(key => {
+              normalizedItem[key.toLowerCase().trim()] = item[key];
+            });
+
+            const opName = (
+              normalizedItem.name || 
+              normalizedItem['tên công đoạn'] || 
+              normalizedItem['công đoạn'] || 
+              normalizedItem['tên'] || 
+              normalizedItem['thao tác'] ||
+              'Unnamed Operation'
+            ).toString().trim();
+
+            const opCode = (
+              normalizedItem.code || 
+              normalizedItem['mã công đoạn'] || 
+              normalizedItem['mã cđ'] || 
+              normalizedItem['mã'] || 
+              'CODE'
+            ).toString().trim();
+
+            const op = {
+              name: opName,
+              code: opCode,
+              style: (
+                normalizedItem.style || 
+                normalizedItem['mã hàng'] || 
+                normalizedItem['mã mã'] ||
+                newOperation.style || 
+                ''
+              ).toString().trim(),
+              sam: Number(
+                normalizedItem.sam || 
+                normalizedItem['định mức'] || 
+                normalizedItem['thời gian'] || 
+                0
+              ),
+              targetPerHour: Number(
+                normalizedItem.target || 
+                normalizedItem['mục tiêu'] || 
+                normalizedItem['số lượng'] ||
+                0
+              )
+            };
+            await addDocToFirestore('operations', op);
+            count++;
+          }
+          alert(`Đã nhập thành công ${count} công đoạn từ Excel!`);
+        } catch (err) {
+          console.error(err);
+          alert("Lỗi khi đọc file Excel. Vui lòng kiểm tra định dạng.");
+        } finally {
+          if (fileInputRef.current) fileInputRef.current.value = '';
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
 
     setIsExtracting(true);
     try {
@@ -856,13 +1000,13 @@ export default function App() {
                   <div className="flex justify-between items-center mb-6">
                     <h3 className="text-xl font-bold font-serif italic">Thêm công nhân mới</h3>
                     <div className="flex items-center gap-2">
-                       <input 
-                         type="file" 
-                         ref={workerFileInputRef} 
-                         className="hidden" 
-                         accept="image/*,.pdf" 
-                         onChange={handleWorkerFileUpload} 
-                       />
+                        <input 
+                          type="file" 
+                          ref={workerFileInputRef} 
+                          className="hidden" 
+                          accept="image/*,.pdf,.xlsx,.xls" 
+                          onChange={handleWorkerFileUpload} 
+                        />
                        <button 
                          onClick={() => workerFileInputRef.current?.click()}
                          disabled={isExtractingWorker}
@@ -994,7 +1138,7 @@ export default function App() {
                          type="file" 
                          ref={fileInputRef} 
                          className="hidden" 
-                         accept="image/*,.pdf" 
+                         accept="image/*,.pdf,.xlsx,.xls" 
                          onChange={handleFileUpload} 
                        />
                        <button 
