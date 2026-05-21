@@ -282,6 +282,7 @@ export default function App() {
   const [tsFilterWorker, setTsFilterWorker] = useState("");
   const [tsSelectedStyle, setTsSelectedStyle] = useState("");
   const [tsSelectedLine, setTsSelectedLine] = useState("");
+  const [tsChartMetric, setTsChartMetric] = useState<"productivity" | "duration">("productivity");
 
   // Time Study State
   const [timeStudy, setTimeStudy] = useState({
@@ -999,6 +1000,21 @@ export default function App() {
       if (styleCompare !== 0) return styleCompare;
 
       return (opA?.name || "").localeCompare(opB?.name || "");
+    });
+  };
+
+  const getFilteredTimeStudyRecords = () => {
+    return getSortedTimeStudyRecords().filter((record) => {
+      const worker = workers.find((w) => w.id === record.workerId);
+      const op = operations.find((o) => o.id === record.operationId);
+      const lineMatch = !tsFilterLine || worker?.line === tsFilterLine;
+      const styleMatch =
+        !tsFilterStyle ||
+        record.style === tsFilterStyle ||
+        op?.style === tsFilterStyle;
+      const workerMatch =
+        !tsFilterWorker || record.workerId === tsFilterWorker;
+      return lineMatch && styleMatch && workerMatch;
     });
   };
 
@@ -2647,25 +2663,143 @@ export default function App() {
                         </div>
                       </div>
                     </div>
+
+                    {(() => {
+                      const filteredData = getFilteredTimeStudyRecords();
+                      if (filteredData.length === 0) return null;
+
+                      const chartData = filteredData.map((record) => {
+                        const worker = workers.find((w) => w.id === record.workerId);
+                        const op = operations.find((o) => o.id === record.operationId);
+                        const op2 = record.operationId2
+                          ? operations.find((o) => o.id === record.operationId2)
+                          : null;
+                        
+                        const workerName = worker?.name || "Chưa rõ";
+                        const opName = op?.name || "Chưa rõ";
+                        const name = `${workerName} (${opName}${op2 ? " + " + op2.name : ""})`;
+                        
+                        return {
+                          fullname: name,
+                          worker: workerName,
+                          operation: opName,
+                          "Năng suất (SP/Giờ)": record.targetPerHour,
+                          "Thời gian (Giây)": record.averageTime,
+                        };
+                      });
+
+                      return (
+                        <motion.div
+                          initial={{ opacity: 0, y: 15 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          className="bg-white/50 p-6 rounded-3xl border border-gray-100 shadow-sm mb-8"
+                        >
+                          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
+                            <div>
+                              <h5 className="text-sm font-bold text-gray-800 uppercase tracking-wider">
+                                Biểu đồ so sánh công đoạn đo thời gian
+                              </h5>
+                              <p className="text-xs text-gray-400 mt-0.5 font-medium">
+                                Đang chọn: {tsFilterLine || "Tất cả chuyền"} • {tsFilterStyle || "Tất cả mã hàng"}
+                              </p>
+                            </div>
+                            <div className="flex bg-gray-100 p-1 rounded-xl text-xs font-semibold self-start sm:self-auto shadow-inner">
+                              <button
+                                onClick={() => setTsChartMetric("productivity")}
+                                className={`px-4 py-2 rounded-lg transition-all cursor-pointer ${
+                                  tsChartMetric === "productivity"
+                                    ? "bg-white text-emerald-600 shadow-sm font-bold"
+                                    : "text-gray-500 hover:text-gray-900"
+                                }`}
+                              >
+                                Năng suất (SP/Giờ)
+                              </button>
+                              <button
+                                onClick={() => setTsChartMetric("duration")}
+                                className={`px-4 py-2 rounded-lg transition-all cursor-pointer ${
+                                  tsChartMetric === "duration"
+                                    ? "bg-white text-amber-600 shadow-sm font-bold"
+                                    : "text-gray-500 hover:text-gray-900"
+                                }`}
+                              >
+                                Thời gian (Giây)
+                              </button>
+                            </div>
+                          </div>
+
+                          <div className="h-[280px] w-full">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart
+                                data={chartData}
+                                margin={{ top: 10, right: 10, left: -20, bottom: 5 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis
+                                  dataKey="worker"
+                                  stroke="#9CA3AF"
+                                  fontSize={10}
+                                  tickLine={false}
+                                  axisLine={false}
+                                />
+                                <YAxis stroke="#9CA3AF" fontSize={10} tickLine={false} axisLine={false} />
+                                <Tooltip
+                                  cursor={{ fill: "rgba(0,0,0,0.02)" }}
+                                  content={({ active, payload }) => {
+                                    if (active && payload && payload.length) {
+                                      const data = payload[0].payload;
+                                      return (
+                                        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xl text-left max-w-sm">
+                                          <p className="font-bold text-gray-900 text-sm mb-1">{data.worker}</p>
+                                          <p className="text-xs text-indigo-600 font-semibold mb-2">
+                                            Công đoạn: {data.operation}
+                                            {data.operation2 ? ` + ${data.operation2}` : ""}
+                                          </p>
+                                          <div className="border-t border-gray-100 pt-2 flex justify-between items-center text-xs">
+                                            <span className="text-gray-500 font-medium">{payload[0].name}:</span>
+                                            <span className={`font-bold ${tsChartMetric === "productivity" ? "text-emerald-600" : "text-amber-600"}`}>
+                                              {payload[0].value} {tsChartMetric === "productivity" ? "sp/h" : "s"}
+                                            </span>
+                                          </div>
+                                        </div>
+                                      );
+                                    }
+                                    return null;
+                                  }}
+                                />
+                                <Bar
+                                  dataKey={
+                                    tsChartMetric === "productivity"
+                                      ? "Năng suất (SP/Giờ)"
+                                      : "Thời gian (Giây)"
+                                  }
+                                  fill={tsChartMetric === "productivity" ? "#10B981" : "#F59E0B"}
+                                  radius={[6, 6, 0, 0]}
+                                  barSize={Math.max(12, Math.min(48, 480 / (chartData.length || 1)))}
+                                >
+                                  {chartData.map((entry, index) => (
+                                    <Cell
+                                      key={`cell-${index}`}
+                                      fill={
+                                        tsChartMetric === "productivity"
+                                          ? index % 2 === 0
+                                            ? "#10B981"
+                                            : "#059669"
+                                          : index % 2 === 0
+                                            ? "#F59E0B"
+                                            : "#D97706"
+                                      }
+                                    />
+                                  ))}
+                                </Bar>
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </motion.div>
+                      );
+                    })()}
+
                     <div className="space-y-4">
-                      {getSortedTimeStudyRecords()
-                        .filter((record) => {
-                          const worker = workers.find(
-                            (w) => w.id === record.workerId,
-                          );
-                          const op = operations.find(
-                            (o) => o.id === record.operationId,
-                          );
-                          const lineMatch =
-                            !tsFilterLine || worker?.line === tsFilterLine;
-                          const styleMatch =
-                            !tsFilterStyle ||
-                            record.style === tsFilterStyle ||
-                            op?.style === tsFilterStyle;
-                          const workerMatch =
-                            !tsFilterWorker || record.workerId === tsFilterWorker;
-                          return lineMatch && styleMatch && workerMatch;
-                        })
+                      {getFilteredTimeStudyRecords()
                         .map((record) => {
                           const worker = workers.find(
                             (w) => w.id === record.workerId,
