@@ -36,6 +36,7 @@ import {
   getDocs,
   where,
   Timestamp,
+  writeBatch,
 } from "firebase/firestore";
 import {
   Worker,
@@ -285,6 +286,7 @@ export default function App() {
   const [tsSelectedStyle, setTsSelectedStyle] = useState("");
   const [tsSelectedLine, setTsSelectedLine] = useState("");
   const [tsChartMetric, setTsChartMetric] = useState<"productivity" | "duration">("productivity");
+  const [tsSortOrder, setTsSortOrder] = useState<"custom" | "newest">("custom");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
@@ -994,6 +996,12 @@ export default function App() {
   };
 
   const getSortedTimeStudyRecords = () => {
+    if (tsSortOrder === "newest") {
+      return [...timeStudyRecords].sort((a, b) => {
+        return (b.date || "").localeCompare(a.date || "");
+      });
+    }
+
     return [...timeStudyRecords].sort((a, b) => {
       const aOrder = typeof (a as any).orderIndex === "number" ? (a as any).orderIndex : null;
       const bOrder = typeof (b as any).orderIndex === "number" ? (b as any).orderIndex : null;
@@ -1016,12 +1024,38 @@ export default function App() {
     const [removed] = reorderedFiltered.splice(draggedIdx, 1);
     reorderedFiltered.splice(targetIdx, 0, removed);
 
-    // Save the new order index to Firestore for each document
-    for (let i = 0; i < reorderedFiltered.length; i++) {
-      const record = reorderedFiltered[i];
-      if ((record as any).orderIndex !== i) {
-        await updateDocInFirestore("timeStudies", record.id, { orderIndex: i });
+    // 1. Update local state immediately for instant feedback
+    const orderIndexMap = new Map<string, number>();
+    reorderedFiltered.forEach((rec, idx) => {
+      orderIndexMap.set(rec.id, idx);
+    });
+
+    setTimeStudyRecords((prev) => {
+      return prev.map((rec) => {
+        if (orderIndexMap.has(rec.id)) {
+          return {
+            ...rec,
+            orderIndex: orderIndexMap.get(rec.id)!,
+          };
+        }
+        return rec;
+      });
+    });
+
+    // 2. Persist the new orderIndex to Firestore using writeBatch
+    if (!user) return;
+    try {
+      const batch = writeBatch(db);
+      for (let i = 0; i < reorderedFiltered.length; i++) {
+        const record = reorderedFiltered[i];
+        if ((record as any).orderIndex !== i) {
+          const docRef = doc(db, `users/${user.uid}/timeStudies`, record.id);
+          batch.update(docRef, { orderIndex: i });
+        }
       }
+      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.UPDATE, `users/${user.uid}/timeStudies`);
     }
   };
 
@@ -2613,12 +2647,31 @@ export default function App() {
                         <h4 className="text-sm font-bold uppercase text-gray-400 tracking-widest">
                           Lịch sử
                         </h4>
-                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-500 border border-indigo-100">
-                          <GripVertical size={10} />
-                          Kéo thả để sắp xếp
-                        </span>
+                        {tsSortOrder === "custom" ? (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-600 border border-indigo-100">
+                            <GripVertical size={10} />
+                            Kéo thả để sắp xếp
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-[10px] font-semibold bg-amber-50 text-amber-600 border border-amber-100">
+                            Sắp xếp: Mới nhất trước
+                          </span>
+                        )}
                       </div>
                       <div className="flex items-center gap-3 flex-wrap">
+                        <div className="flex items-center gap-2">
+                          <span className="text-[10px] font-bold text-gray-400 uppercase">
+                            Sắp xếp:
+                          </span>
+                          <select
+                            value={tsSortOrder}
+                            onChange={(e) => setTsSortOrder(e.target.value as "custom" | "newest")}
+                            className="text-xs p-2 rounded-lg border border-gray-200 bg-white font-semibold text-gray-700"
+                          >
+                            <option value="custom">Thứ tự tùy chỉnh (Kéo thả)</option>
+                            <option value="newest">Lọc từ Mới đến Cũ</option>
+                          </select>
+                        </div>
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-bold text-gray-400 uppercase">
                             Chuyền:
@@ -2887,15 +2940,19 @@ export default function App() {
                           return (
                             <div
                               key={record.id}
-                              draggable
+                              draggable={tsSortOrder === "custom"}
                               onDragStart={(e) => {
+                                if (tsSortOrder !== "custom") return;
                                 setDraggedIndex(index);
                                 e.dataTransfer.effectAllowed = "move";
+                                e.dataTransfer.setData("text/plain", String(index));
                               }}
                               onDragOver={(e) => {
+                                if (tsSortOrder !== "custom") return;
                                 e.preventDefault();
                               }}
                               onDragEnter={() => {
+                                if (tsSortOrder !== "custom") return;
                                 setDragOverIndex(index);
                               }}
                               onDragEnd={() => {
@@ -2903,6 +2960,7 @@ export default function App() {
                                 setDragOverIndex(null);
                               }}
                               onDrop={(e) => {
+                                if (tsSortOrder !== "custom") return;
                                 e.preventDefault();
                                 if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
                                   handleReorderTimeStudyRecords(draggedIndex, dragOverIndex);
@@ -2910,18 +2968,28 @@ export default function App() {
                                 setDraggedIndex(null);
                                 setDragOverIndex(null);
                               }}
-                              className={`bg-gray-50/50 p-6 rounded-2xl border transition-all flex items-center justify-between group cursor-grab active:cursor-grabbing ${
+                              className={`bg-gray-50/50 p-6 rounded-2xl border transition-all flex items-center justify-between group select-none ${
+                                tsSortOrder === "custom"
+                                  ? "cursor-grab active:cursor-grabbing hover:border-indigo-200"
+                                  : "cursor-default hover:border-gray-200"
+                              } ${
                                 draggedIndex === index
                                   ? "opacity-40 border-dashed border-indigo-300 bg-gray-100/50"
                                   : dragOverIndex === index
                                     ? "border-indigo-500 bg-indigo-50/40 shadow-md scale-[1.01]"
-                                    : "border-gray-100 hover:border-indigo-200"
-                              }`}
+                                    : "border-gray-100"
+                              } ${draggedIndex !== null ? "*:pointer-events-none" : ""}`}
                             >
                               <div className="flex items-center gap-6">
-                                <div className="text-gray-300 group-hover:text-indigo-400 transition-colors cursor-grab active:cursor-grabbing p-1">
-                                  <GripVertical size={16} />
-                                </div>
+                                {tsSortOrder === "custom" ? (
+                                  <div className="text-gray-300 group-hover:text-indigo-400 transition-colors cursor-grab active:cursor-grabbing p-1">
+                                    <GripVertical size={16} />
+                                  </div>
+                                ) : (
+                                  <div className="text-gray-200 p-1 opacity-40" title="Đang ở chế độ sắp xếp theo ngày">
+                                    <GripVertical size={16} />
+                                  </div>
+                                )}
                                 <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-white border border-gray-100 shadow-sm w-20">
                                   <p className="text-lg font-black text-indigo-600 font-mono">
                                     {record.averageTime}s
