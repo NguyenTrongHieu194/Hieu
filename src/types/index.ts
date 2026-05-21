@@ -44,6 +44,7 @@ export interface TimeStudyRecord {
   date: string;
   workerId: string;
   operationId: string;
+  operationId2?: string; // Optional second operation for merged operations
   style: string;
   times: number[];
   averageTime: number;
