@@ -90,6 +90,40 @@ interface FirestoreErrorInfo {
   };
 }
 
+const CustomChartTick = (props: any) => {
+  const { x, y, payload } = props;
+  const name = payload?.value || "";
+  
+  const words = name.trim().split(/\s+/);
+  let lines: string[] = [];
+  if (words.length <= 2) {
+    lines = [name];
+  } else if (words.length === 3) {
+    lines = [words[0], words.slice(1).join(" ")];
+  } else {
+    const mid = Math.ceil(words.length / 2);
+    lines = [words.slice(0, mid).join(" "), words.slice(mid).join(" ")];
+  }
+
+  return (
+    <g transform={`translate(${x},${y})`}>
+      <text
+        x={0}
+        y={0}
+        textAnchor="middle"
+        fill="#6B7280"
+        style={{ fontSize: "8px", fontWeight: "600", fontFamily: "sans-serif" }}
+      >
+        {lines.map((line, idx) => (
+          <tspan key={idx} x={0} dy={idx === 0 ? 8 : 10}>
+            {line}
+          </tspan>
+        ))}
+      </text>
+    </g>
+  );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -2832,15 +2866,16 @@ export default function App() {
                             <ResponsiveContainer width="100%" height="100%">
                               <BarChart
                                 data={chartData}
-                                margin={{ top: 25, right: 10, left: -20, bottom: 5 }}
+                                margin={{ top: 25, right: 10, left: -20, bottom: 35 }}
                               >
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                                 <XAxis
                                   dataKey="worker"
                                   stroke="#9CA3AF"
-                                  fontSize={10}
+                                  tick={<CustomChartTick />}
                                   tickLine={false}
                                   axisLine={false}
+                                  interval={0}
                                 />
                                 <YAxis stroke="#9CA3AF" fontSize={10} tickLine={false} axisLine={false} />
                                 <Tooltip
