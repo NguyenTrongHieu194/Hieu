@@ -984,22 +984,7 @@ export default function App() {
 
   const getSortedTimeStudyRecords = () => {
     return [...timeStudyRecords].sort((a, b) => {
-      const workerA = workers.find((w) => w.id === a.workerId);
-      const workerB = workers.find((w) => w.id === b.workerId);
-      const opA = operations.find((o) => o.id === a.operationId);
-      const opB = operations.find((o) => o.id === b.operationId);
-
-      const lineCompare = (workerA?.line || "").localeCompare(
-        workerB?.line || "",
-      );
-      if (lineCompare !== 0) return lineCompare;
-
-      const styleA = a.style || opA?.style || "";
-      const styleB = b.style || opB?.style || "";
-      const styleCompare = styleA.localeCompare(styleB);
-      if (styleCompare !== 0) return styleCompare;
-
-      return (opA?.name || "").localeCompare(opB?.name || "");
+      return (b.date || "").localeCompare(a.date || "");
     });
   };
 
