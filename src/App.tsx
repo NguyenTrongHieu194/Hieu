@@ -19,6 +19,7 @@ import {
   Loader2,
   LogIn,
   Trash2,
+  GripVertical,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { auth, db, signInWithGoogle, logOut } from "./lib/firebase";
@@ -56,6 +57,7 @@ import {
   LineChart,
   Line,
   Cell,
+  LabelList,
 } from "recharts";
 
 type Tab =
@@ -283,6 +285,8 @@ export default function App() {
   const [tsSelectedStyle, setTsSelectedStyle] = useState("");
   const [tsSelectedLine, setTsSelectedLine] = useState("");
   const [tsChartMetric, setTsChartMetric] = useState<"productivity" | "duration">("productivity");
+  const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
+  const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
   // Time Study State
   const [timeStudy, setTimeStudy] = useState({
@@ -908,6 +912,12 @@ export default function App() {
     const outputPerHour = Math.round(3600 / avgTimeAdjusted);
     const outputPerDay = outputPerHour * 8;
 
+    const existingOrders = timeStudyRecords
+      .map((r) => (r as any).orderIndex)
+      .filter((val): val is number => typeof val === "number");
+    const minOrder = existingOrders.length > 0 ? Math.min(...existingOrders) : 0;
+    const newOrderIndex = minOrder - 1;
+
     const record = {
       date: format(new Date(), "yyyy-MM-dd HH:mm"),
       workerId: timeStudy.workerId,
@@ -918,6 +928,7 @@ export default function App() {
       targetPerHour: outputPerHour,
       targetPerDay: outputPerDay,
       style: tsSelectedStyle, // Store style name directly for reliability
+      orderIndex: newOrderIndex,
     };
 
     await addDocToFirestore("timeStudies", record);
@@ -984,8 +995,34 @@ export default function App() {
 
   const getSortedTimeStudyRecords = () => {
     return [...timeStudyRecords].sort((a, b) => {
+      const aOrder = typeof (a as any).orderIndex === "number" ? (a as any).orderIndex : null;
+      const bOrder = typeof (b as any).orderIndex === "number" ? (b as any).orderIndex : null;
+
+      if (aOrder !== null && bOrder !== null) {
+        return aOrder - bOrder;
+      }
+      if (aOrder !== null) return -1;
+      if (bOrder !== null) return 1;
+
       return (b.date || "").localeCompare(a.date || "");
     });
+  };
+
+  const handleReorderTimeStudyRecords = async (draggedIdx: number, targetIdx: number) => {
+    const filtered = getFilteredTimeStudyRecords();
+    if (draggedIdx === targetIdx) return;
+
+    const reorderedFiltered = [...filtered];
+    const [removed] = reorderedFiltered.splice(draggedIdx, 1);
+    reorderedFiltered.splice(targetIdx, 0, removed);
+
+    // Save the new order index to Firestore for each document
+    for (let i = 0; i < reorderedFiltered.length; i++) {
+      const record = reorderedFiltered[i];
+      if ((record as any).orderIndex !== i) {
+        await updateDocInFirestore("timeStudies", record.id, { orderIndex: i });
+      }
+    }
   };
 
   const getFilteredTimeStudyRecords = () => {
@@ -2572,9 +2609,15 @@ export default function App() {
 
                   <div className="mt-12 border-t border-gray-100 pt-8">
                     <div className="flex flex-col md:flex-row md:items-center justify-between mb-6 gap-4">
-                      <h4 className="text-sm font-bold uppercase text-gray-400 tracking-widest">
-                        Lịch sử
-                      </h4>
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-sm font-bold uppercase text-gray-400 tracking-widest">
+                          Lịch sử
+                        </h4>
+                        <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-indigo-50 text-indigo-500 border border-indigo-100">
+                          <GripVertical size={10} />
+                          Kéo thả để sắp xếp
+                        </span>
+                      </div>
                       <div className="flex items-center gap-3 flex-wrap">
                         <div className="flex items-center gap-2">
                           <span className="text-[10px] font-bold text-gray-400 uppercase">
@@ -2668,10 +2711,30 @@ export default function App() {
                           fullname: name,
                           worker: workerName,
                           operation: opName,
+                          operation2: op2?.name || "",
                           "Năng suất (SP/Giờ)": record.targetPerHour,
                           "Thời gian (Giây)": record.averageTime,
                         };
                       });
+
+                      const opColors = [
+                        "#3B82F6", // Blue
+                        "#10B981", // Emerald
+                        "#F59E0B", // Amber
+                        "#EF4444", // Red
+                        "#8B5CF6", // Purple
+                        "#EC4899", // Pink
+                        "#06B6D4", // Cyan
+                        "#14B8A6", // Teal
+                        "#F97316", // Orange
+                        "#6366F1", // Indigo
+                        "#84CC16", // Lime
+                        "#A855F7", // Deep Purple
+                      ];
+
+                      const uniqueOperations = Array.from(
+                        new Set(chartData.map((d) => d.operation).filter(Boolean))
+                      );
 
                       return (
                         <motion.div
@@ -2716,7 +2779,7 @@ export default function App() {
                             <ResponsiveContainer width="100%" height="100%">
                               <BarChart
                                 data={chartData}
-                                margin={{ top: 10, right: 10, left: -20, bottom: 5 }}
+                                margin={{ top: 25, right: 10, left: -20, bottom: 5 }}
                               >
                                 <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
                                 <XAxis
@@ -2757,27 +2820,51 @@ export default function App() {
                                       ? "Năng suất (SP/Giờ)"
                                       : "Thời gian (Giây)"
                                   }
-                                  fill={tsChartMetric === "productivity" ? "#10B981" : "#F59E0B"}
                                   radius={[6, 6, 0, 0]}
                                   barSize={Math.max(12, Math.min(48, 480 / (chartData.length || 1)))}
                                 >
-                                  {chartData.map((entry, index) => (
-                                    <Cell
-                                      key={`cell-${index}`}
-                                      fill={
-                                        tsChartMetric === "productivity"
-                                          ? index % 2 === 0
-                                            ? "#10B981"
-                                            : "#059669"
-                                          : index % 2 === 0
-                                            ? "#F59E0B"
-                                            : "#D97706"
-                                      }
-                                    />
-                                  ))}
+                                  {chartData.map((entry, index) => {
+                                    const opIndex = uniqueOperations.indexOf(entry.operation);
+                                    const color = opColors[opIndex % opColors.length] || "#9CA3AF";
+                                    return (
+                                      <Cell
+                                        key={`cell-${index}`}
+                                        fill={color}
+                                      />
+                                    );
+                                  })}
+                                  <LabelList
+                                    dataKey={
+                                      tsChartMetric === "productivity"
+                                        ? "Năng suất (SP/Giờ)"
+                                        : "Thời gian (Giây)"
+                                    }
+                                    position="top"
+                                    formatter={(val: number) => {
+                                      return tsChartMetric === "productivity" ? `${val} sp/h` : `${val}s`;
+                                    }}
+                                    style={{
+                                      fontSize: 10,
+                                      fontWeight: 700,
+                                      fill: "#374151",
+                                    }}
+                                  />
                                 </Bar>
                               </BarChart>
                             </ResponsiveContainer>
+                          </div>
+
+                          {/* Dynamic Color Legend for Operations */}
+                          <div className="flex flex-wrap gap-x-4 gap-y-1.5 mt-4 justify-center bg-gray-50/50 p-3 rounded-2xl border border-gray-100">
+                            {uniqueOperations.map((opName, idx) => {
+                              const color = opColors[idx % opColors.length] || "#9CA3AF";
+                              return (
+                                <div key={opName} className="flex items-center gap-1.5 text-xs text-gray-600 font-semibold">
+                                  <span className="w-3 h-3 rounded-md inline-block shadow-sm" style={{ backgroundColor: color }} />
+                                  <span>{opName}</span>
+                                </div>
+                              );
+                            })}
                           </div>
                         </motion.div>
                       );
@@ -2785,7 +2872,7 @@ export default function App() {
 
                     <div className="space-y-4">
                       {getFilteredTimeStudyRecords()
-                        .map((record) => {
+                        .map((record, index) => {
                           const worker = workers.find(
                             (w) => w.id === record.workerId,
                           );
@@ -2800,9 +2887,41 @@ export default function App() {
                           return (
                             <div
                               key={record.id}
-                              className="bg-gray-50/50 p-6 rounded-2xl border border-gray-100 flex items-center justify-between group hover:border-indigo-200 transition-all"
+                              draggable
+                              onDragStart={(e) => {
+                                setDraggedIndex(index);
+                                e.dataTransfer.effectAllowed = "move";
+                              }}
+                              onDragOver={(e) => {
+                                e.preventDefault();
+                              }}
+                              onDragEnter={() => {
+                                setDragOverIndex(index);
+                              }}
+                              onDragEnd={() => {
+                                setDraggedIndex(null);
+                                setDragOverIndex(null);
+                              }}
+                              onDrop={(e) => {
+                                e.preventDefault();
+                                if (draggedIndex !== null && dragOverIndex !== null && draggedIndex !== dragOverIndex) {
+                                  handleReorderTimeStudyRecords(draggedIndex, dragOverIndex);
+                                }
+                                setDraggedIndex(null);
+                                setDragOverIndex(null);
+                              }}
+                              className={`bg-gray-50/50 p-6 rounded-2xl border transition-all flex items-center justify-between group cursor-grab active:cursor-grabbing ${
+                                draggedIndex === index
+                                  ? "opacity-40 border-dashed border-indigo-300 bg-gray-100/50"
+                                  : dragOverIndex === index
+                                    ? "border-indigo-500 bg-indigo-50/40 shadow-md scale-[1.01]"
+                                    : "border-gray-100 hover:border-indigo-200"
+                              }`}
                             >
                               <div className="flex items-center gap-6">
+                                <div className="text-gray-300 group-hover:text-indigo-400 transition-colors cursor-grab active:cursor-grabbing p-1">
+                                  <GripVertical size={16} />
+                                </div>
                                 <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-white border border-gray-100 shadow-sm w-20">
                                   <p className="text-lg font-black text-indigo-600 font-mono">
                                     {record.averageTime}s
@@ -2846,7 +2965,7 @@ export default function App() {
                                   onClick={() =>
                                     handleDeleteTimeStudyRecord(record.id)
                                   }
-                                  className="text-gray-300 hover:text-rose-500 transition-colors ml-4 p-2"
+                                  className="text-gray-300 hover:text-rose-500 transition-colors ml-4 p-2 cursor-pointer"
                                 >
                                   <X size={18} />
                                 </button>
