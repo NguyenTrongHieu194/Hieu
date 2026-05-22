@@ -50,4 +50,6 @@ export interface TimeStudyRecord {
   averageTime: number;
   targetPerHour: number;
   targetPerDay: number;
+  needsCheck?: boolean;
+  needsCheckTimes?: boolean[]; // Marks which sub-times [first, second, third] need checks
 }

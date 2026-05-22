@@ -24,6 +24,7 @@ import {
   Pause,
   RotateCcw,
   Timer,
+  AlertTriangle,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import { auth, db, signInWithGoogle, logOut } from "./lib/firebase";
@@ -551,6 +552,9 @@ export default function App() {
     time1: 0,
     time2: 0,
     time3: 0,
+    needsCheck1: false,
+    needsCheck2: false,
+    needsCheck3: false,
   });
 
   // Form States
@@ -1184,16 +1188,31 @@ export default function App() {
       targetPerDay: outputPerDay,
       style: tsSelectedStyle, // Store style name directly for reliability
       orderIndex: newOrderIndex,
+      needsCheck: timeStudy.needsCheck1 || timeStudy.needsCheck2 || timeStudy.needsCheck3,
+      needsCheckTimes: [timeStudy.needsCheck1, timeStudy.needsCheck2, timeStudy.needsCheck3],
     };
 
     await addDocToFirestore("timeStudies", record);
-    setTimeStudy({ ...timeStudy, operationId2: "", time1: 0, time2: 0, time3: 0 });
+    setTimeStudy({
+      ...timeStudy,
+      operationId2: "",
+      time1: 0,
+      time2: 0,
+      time3: 0,
+      needsCheck1: false,
+      needsCheck2: false,
+      needsCheck3: false,
+    });
     setTsSelectedLine("");
     alert("Đã lưu kết quả nghiên cứu (đã cộng thêm 20% thời gian bù hao)!");
   };
 
   const handleDeleteTimeStudyRecord = async (id: string) => {
     await deleteDocFromFirestore("timeStudies", id);
+  };
+
+  const handleToggleTimeStudyCheck = async (id: string, currentVal: boolean) => {
+    await updateDocInFirestore("timeStudies", id, { needsCheck: !currentVal });
   };
 
   // Sorting logic based on Line -> Order -> Operation -> Worker
@@ -2817,38 +2836,104 @@ export default function App() {
                         onLap={(lapSecs) => {
                           setTimeStudy((prev) => {
                             if (prev.time1 === 0) {
-                              return { ...prev, time1: lapSecs };
+                              return { ...prev, time1: lapSecs, needsCheck1: false };
                             } else if (prev.time2 === 0) {
-                              return { ...prev, time2: lapSecs };
+                              return { ...prev, time2: lapSecs, needsCheck2: false };
                             } else if (prev.time3 === 0) {
-                              return { ...prev, time3: lapSecs };
+                              return { ...prev, time3: lapSecs, needsCheck3: false };
                             } else {
-                              return { ...prev, time1: lapSecs, time2: 0, time3: 0 };
+                              return {
+                                ...prev,
+                                time1: lapSecs,
+                                time2: 0,
+                                time3: 0,
+                                needsCheck1: false,
+                                needsCheck2: false,
+                                needsCheck3: false,
+                              };
                             }
                           });
                         }}
                       />
 
                       <div className="grid grid-cols-3 gap-4">
-                        {["time1", "time2", "time3"].map((key, i) => (
-                          <div key={key} className="space-y-2">
-                            <p className="text-[10px] text-center font-bold text-gray-400">
-                              Lần {i + 1} (Hộp nhập/ghi)
-                            </p>
-                            <input
-                              type="number"
-                              value={(timeStudy as any)[key] || ""}
-                              onChange={(e) =>
-                                setTimeStudy({
-                                  ...timeStudy,
-                                  [key]: Number(e.target.value),
-                                })
-                              }
-                              className="w-full p-4 rounded-2xl border-2 border-gray-100 bg-white text-center text-xl font-black font-mono text-indigo-600 focus:border-indigo-500 outline-none transition-all shadow-sm"
-                              placeholder="0"
-                            />
-                          </div>
-                        ))}
+                        {["time1", "time2", "time3"].map((key, i) => {
+                          const checkKey = `needsCheck${i + 1}`;
+                          const needsCheckVal = (timeStudy as any)[checkKey];
+                          const hasValue = (timeStudy as any)[key] > 0;
+
+                          return (
+                            <div key={key} className="space-y-2 flex flex-col items-center">
+                              <p className="text-[10px] text-center font-bold text-gray-400 uppercase tracking-wider">
+                                Lần {i + 1}
+                              </p>
+                              
+                              <div className="relative w-full">
+                                <input
+                                  type="number"
+                                  value={(timeStudy as any)[key] || ""}
+                                  onChange={(e) =>
+                                    setTimeStudy({
+                                      ...timeStudy,
+                                      [key]: Number(e.target.value),
+                                    })
+                                  }
+                                  className={`w-full p-4 rounded-2xl border-2 text-center text-xl font-black font-mono focus:border-indigo-500 outline-none transition-all shadow-sm ${
+                                    needsCheckVal
+                                      ? "bg-amber-50 border-amber-400 text-amber-700 placeholder-amber-400 focus:border-amber-500 animate-[pulse_3s_infinite]"
+                                      : "bg-white border-gray-100 text-indigo-600"
+                                  }`}
+                                  placeholder="0"
+                                />
+                                {needsCheckVal && (
+                                  <span className="absolute top-1 right-2 flex h-2 w-2">
+                                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75"></span>
+                                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-500"></span>
+                                  </span>
+                                )}
+                              </div>
+
+                              <div className="w-full flex flex-col items-center gap-1">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setTimeStudy((prev) => ({
+                                      ...prev,
+                                      [checkKey]: !needsCheckVal,
+                                    }))
+                                  }
+                                  className={`text-[9.5px] w-full py-1.5 px-1.5 rounded-xl border font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer ${
+                                    needsCheckVal
+                                      ? "bg-amber-150 hover:bg-amber-200 border-amber-400 text-amber-800"
+                                      : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-500"
+                                  }`}
+                                >
+                                  ⚠️ {needsCheckVal ? "Sắp xếp đo lại" : "Đo lại / Check"}
+                                </button>
+
+                                {hasValue ? (
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      setTimeStudy((prev) => ({
+                                        ...prev,
+                                        [key]: 0,
+                                        [checkKey]: false,
+                                      }))
+                                    }
+                                    className="text-[9.5px] w-full py-1.5 px-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer shadow-sm"
+                                  >
+                                    ✕ Đặt lại (Xóa)
+                                  </button>
+                                ) : (
+                                  <div className="text-[9.5px] w-full py-1.5 px-1.5 rounded-xl border border-dashed border-gray-100 text-gray-300 font-medium flex items-center justify-center gap-1 select-none">
+                                    Chưa có số liệu
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
                       </div>
 
                       {/* Calculation Results */}
@@ -3243,51 +3328,90 @@ export default function App() {
                                 setDraggedIndex(null);
                                 setDragOverIndex(null);
                               }}
-                              className={`bg-gray-50/50 p-6 rounded-2xl border transition-all flex items-center justify-between group select-none ${
+                              className={`${
+                                record.needsCheck
+                                  ? "bg-amber-50/70 border-amber-300 shadow-sm shadow-amber-400/5 animate-[pulse_4s_infinite]"
+                                  : "bg-gray-50/50 border-gray-100 hover:border-gray-200"
+                              } p-6 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 group select-none ${
                                 tsSortOrder === "custom"
                                   ? "cursor-grab active:cursor-grabbing hover:border-indigo-200"
-                                  : "cursor-default hover:border-gray-200"
+                                  : "cursor-default"
                               } ${
                                 draggedIndex === index
                                   ? "opacity-40 border-dashed border-indigo-300 bg-gray-100/50"
                                   : dragOverIndex === index
                                     ? "border-indigo-500 bg-indigo-50/40 shadow-md scale-[1.01]"
-                                    : "border-gray-100"
+                                    : ""
                               } ${draggedIndex !== null ? "*:pointer-events-none" : ""}`}
                             >
-                              <div className="flex items-center gap-6">
-                                {tsSortOrder === "custom" ? (
-                                  <div className="text-gray-300 group-hover:text-indigo-400 transition-colors cursor-grab active:cursor-grabbing p-1">
-                                    <GripVertical size={16} />
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-6 flex-1">
+                                <div className="flex items-center gap-4">
+                                  {tsSortOrder === "custom" ? (
+                                    <div className="text-gray-300 group-hover:text-indigo-400 transition-colors cursor-grab active:cursor-grabbing p-1">
+                                      <GripVertical size={16} />
+                                    </div>
+                                  ) : (
+                                    <div className="text-gray-200 p-1 opacity-40" title="Đang ở chế độ sắp xếp theo ngày">
+                                      <GripVertical size={16} />
+                                    </div>
+                                  )}
+                                  <div className={`flex flex-col items-center justify-center p-3 rounded-xl border shadow-sm w-20 flex-shrink-0 transition-colors ${
+                                    record.needsCheck
+                                      ? "bg-amber-500 border-amber-400 text-slate-900"
+                                      : "bg-white border-gray-100 text-indigo-600"
+                                  }`}>
+                                    <p className={`text-lg font-black font-mono ${record.needsCheck ? "text-slate-900" : "text-indigo-600"}`}>
+                                      {record.averageTime}s
+                                    </p>
+                                    <p className={`text-[8px] uppercase font-bold ${record.needsCheck ? "text-slate-800" : "text-gray-400"}`}>
+                                      Avg Time
+                                    </p>
                                   </div>
-                                ) : (
-                                  <div className="text-gray-200 p-1 opacity-40" title="Đang ở chế độ sắp xếp theo ngày">
-                                    <GripVertical size={16} />
-                                  </div>
-                                )}
-                                <div className="flex flex-col items-center justify-center p-3 rounded-xl bg-white border border-gray-100 shadow-sm w-20">
-                                  <p className="text-lg font-black text-indigo-600 font-mono">
-                                    {record.averageTime}s
-                                  </p>
-                                  <p className="text-[8px] uppercase font-bold text-gray-400">
-                                    Avg Time
-                                  </p>
                                 </div>
-                                <div>
-                                  <div className="flex items-center gap-2 mb-1">
+                                
+                                <div className="space-y-1">
+                                  <div className="flex flex-wrap items-center gap-2">
                                     <span className="bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
                                       {worker?.line}
                                     </span>
                                     <p className="text-sm font-bold text-gray-900">
                                       {op?.name}{op2 ? ` + ${op2.name}` : ""} • {worker?.name}
                                     </p>
+                                    {record.needsCheck && (
+                                      <span className="bg-amber-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wide animate-pulse">
+                                        <AlertTriangle size={10} /> Cần kiểm tra lại / Đo lại
+                                      </span>
+                                    )}
                                   </div>
                                   <p className="text-[10px] text-gray-400 font-semibold">
                                     {styleName} • {record.date}
                                   </p>
+                                  
+                                  {/* Sub-times detailed list */}
+                                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                    <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">Các lần đo:</span>
+                                    {record.times?.map((t, idx) => {
+                                      const isSubChecked = record.needsCheckTimes?.[idx];
+                                      return (
+                                        <span
+                                          key={idx}
+                                          className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold transition-all ${
+                                            isSubChecked
+                                              ? "bg-amber-100 text-amber-800 border border-amber-400 shadow-sm shadow-amber-500/15"
+                                              : "bg-white border border-gray-200 text-gray-600"
+                                          }`}
+                                          title={isSubChecked ? "Lần đo này được đánh dấu cần check lại" : `Lần đo ${idx + 1}`}
+                                        >
+                                          L{idx + 1}: <span className={isSubChecked ? "text-amber-900 font-extraboldUnderline" : "text-gray-800"}>{t}s</span>
+                                          {isSubChecked && " ⚠️"}
+                                        </span>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               </div>
-                              <div className="flex items-center gap-8">
+                              
+                              <div className="flex items-center justify-between sm:justify-end gap-6 border-t md:border-t-0 pt-4 md:pt-0 border-gray-100">
                                 <div className="text-right">
                                   <p className="text-xs font-bold text-gray-900">
                                     {record.targetPerHour} sp/h
@@ -3296,7 +3420,7 @@ export default function App() {
                                     Năng suất/Giờ
                                   </p>
                                 </div>
-                                <div className="text-right border-l border-gray-200 pl-8">
+                                <div className="text-right border-l border-gray-200 pl-6 h-8 flex flex-col justify-center">
                                   <p className="text-xs font-bold text-emerald-600">
                                     {record.targetPerDay} sp/d
                                   </p>
@@ -3304,14 +3428,33 @@ export default function App() {
                                     Năng suất/Ngày
                                   </p>
                                 </div>
-                                <button
-                                  onClick={() =>
-                                    handleDeleteTimeStudyRecord(record.id)
-                                  }
-                                  className="text-gray-300 hover:text-rose-500 transition-colors ml-4 p-2 cursor-pointer"
-                                >
-                                  <X size={18} />
-                                </button>
+                                
+                                <div className="flex items-center gap-1.5 ml-2 border-l border-gray-200 pl-6">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleToggleTimeStudyCheck(record.id, !!record.needsCheck)}
+                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-extrabold uppercase transition-all active:scale-95 cursor-pointer whitespace-nowrap ${
+                                      record.needsCheck
+                                        ? "bg-amber-500 hover:bg-amber-400 text-slate-900 border-amber-400 shadow-md shadow-amber-500/10"
+                                        : "bg-white hover:bg-gray-100 text-gray-500 hover:text-amber-600 border-gray-200"
+                                    }`}
+                                    title="Đánh dấu cần đo lại / bấm thời gian lại"
+                                  >
+                                    <AlertTriangle size={13} className={record.needsCheck ? "animate-bounce" : ""} />
+                                    <span>{record.needsCheck ? "Hủy Flag" : "Check Lại"}</span>
+                                  </button>
+
+                                  <button
+                                    type="button"
+                                    onClick={() =>
+                                      handleDeleteTimeStudyRecord(record.id)
+                                    }
+                                    className="text-gray-300 hover:text-rose-500 hover:bg-rose-50 transition-all rounded-xl p-2 cursor-pointer"
+                                    title="Xóa bản ghi"
+                                  >
+                                    <X size={18} />
+                                  </button>
+                                </div>
                               </div>
                             </div>
                           );
