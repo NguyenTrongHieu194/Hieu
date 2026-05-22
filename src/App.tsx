@@ -128,6 +128,221 @@ const CustomChartTick = (props: any) => {
   );
 };
 
+interface StopwatchTerminalProps {
+  onLap: (lapSecs: number) => void;
+  timeStudy: {
+    time1: number;
+    time2: number;
+    time3: number;
+  };
+}
+
+const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
+  const [swRunning, setSwRunning] = useState(false);
+  const [swTime, setSwTime] = useState(0); // in milliseconds
+  const [swLaps, setSwLaps] = useState<number[]>([]);
+  const [swLastLapTime, setSwLastLapTime] = useState<number>(0);
+  const swStartTimeRef = useRef<number>(0);
+  const swAccumulatedRef = useRef<number>(0);
+  const swIntervalRef = useRef<any>(null);
+
+  const startStopwatch = () => {
+    if (swRunning) return;
+    swStartTimeRef.current = Date.now() - swAccumulatedRef.current;
+    setSwRunning(true);
+    swIntervalRef.current = setInterval(() => {
+      const current = Date.now() - swStartTimeRef.current;
+      setSwTime(current);
+    }, 16); // 60 FPS is extremely smooth!
+  };
+
+  const pauseStopwatch = () => {
+    if (!swRunning) return;
+    clearInterval(swIntervalRef.current);
+    swAccumulatedRef.current = swTime;
+    setSwRunning(false);
+  };
+
+  const resetStopwatch = () => {
+    clearInterval(swIntervalRef.current);
+    swStartTimeRef.current = 0;
+    swAccumulatedRef.current = 0;
+    setSwTime(0);
+    setSwRunning(false);
+    setSwLaps([]);
+    setSwLastLapTime(0);
+  };
+
+  const recordLap = () => {
+    if (swTime === 0) return;
+    const currentLapTime = swTime - swLastLapTime;
+    const lapSecs = Number((currentLapTime / 1000).toFixed(2));
+    if (lapSecs <= 0) return;
+
+    onLap(lapSecs);
+
+    setSwLaps((prev) => [lapSecs, ...prev]);
+    setSwLastLapTime(swTime);
+  };
+
+  // Listen to parent clear
+  useEffect(() => {
+    if (timeStudy.time1 === 0 && timeStudy.time2 === 0 && timeStudy.time3 === 0) {
+      clearInterval(swIntervalRef.current);
+      swStartTimeRef.current = 0;
+      swAccumulatedRef.current = 0;
+      setSwTime(0);
+      setSwRunning(false);
+      setSwLaps([]);
+      setSwLastLapTime(0);
+    }
+  }, [timeStudy.time1, timeStudy.time2, timeStudy.time3]);
+
+  useEffect(() => {
+    return () => {
+      if (swIntervalRef.current) {
+        clearInterval(swIntervalRef.current);
+      }
+    };
+  }, []);
+
+  const nextSlot =
+    timeStudy.time1 === 0
+      ? "Lần 1"
+      : timeStudy.time2 === 0
+        ? "Lần 2"
+        : timeStudy.time3 === 0
+          ? "Lần 3"
+          : "Vòng 1";
+
+  // Formatter for display
+  const totalCentiseconds = Math.floor(swTime / 10);
+  const cs = String(totalCentiseconds % 100).padStart(2, "0");
+  const totalSeconds = Math.floor(swTime / 1000);
+  const ss = String(totalSeconds % 60).padStart(2, "0");
+  const mm = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
+  const displayTime = totalSeconds < 60 ? `${ss}.${cs}s` : `${mm}:${ss}.${cs}`;
+
+  return (
+    <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white rounded-3xl p-6 shadow-xl border border-indigo-500/20 relative overflow-hidden">
+      {/* Decorative background lights */}
+      <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
+
+      <div className="flex flex-col sm:flex-row items-center gap-6 relative z-10">
+        {/* Circular progress dial */}
+        <div className="relative flex-shrink-0 flex items-center justify-center w-36 h-36">
+          <svg className="w-full h-full transform -rotate-90">
+            {/* Background track circle */}
+            <circle
+              cx="72"
+              cy="72"
+              r="55"
+              className="stroke-indigo-950/50 fill-transparent"
+              strokeWidth="8"
+            />
+            {/* Glowing active animated indicator */}
+            <circle
+              cx="72"
+              cy="72"
+              r="55"
+              className="stroke-indigo-400 fill-transparent transition-all duration-75"
+              strokeWidth="8"
+              strokeDasharray={2 * Math.PI * 55}
+              strokeDashoffset={
+                2 * Math.PI * 55 -
+                ((swTime % 60000) / 60000) * (2 * Math.PI * 55)
+              }
+              strokeLinecap="round"
+            />
+          </svg>
+          {/* Inner Digital display */}
+          <div className="absolute flex flex-col items-center justify-center">
+            <span className="text-2xl font-black font-mono tracking-tight text-white drop-shadow-md">
+              {displayTime}
+            </span>
+            <span className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest mt-0.5">
+              {swRunning ? "🏃 ĐANG CHẠY" : "⏹️ TẠM DỪNG"}
+            </span>
+          </div>
+        </div>
+
+        {/* Control Stack */}
+        <div className="flex-1 w-full flex flex-col justify-between self-stretch">
+          <div>
+            <div className="text-indigo-200 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5">
+              <Timer size={14} className="text-indigo-400 animate-pulse" />
+              Thiết bị đo chu kỳ xoay vòng
+            </div>
+            <p className="text-[11px] text-indigo-200/80 leading-relaxed mb-4">
+              Bấm <strong className="text-white">Bắt đầu</strong>, sau đó nhấn <strong className="text-white">Bấm Vòng</strong> mỗi lần thao tác kết thúc để tự động thu thập lần đo.
+            </p>
+          </div>
+
+          <div className="flex flex-wrap gap-2 mt-auto">
+            <button
+              type="button"
+              onClick={swRunning ? pauseStopwatch : startStopwatch}
+              className={`flex-1 min-w-[100px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
+                swRunning
+                  ? "bg-amber-500 hover:bg-amber-400 text-slate-900 active:scale-95"
+                  : "bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-600/30 active:scale-95"
+              }`}
+            >
+              {swRunning ? (
+                <>
+                  <Pause size={13} fill="currentColor" /> Tạm dừng
+                </>
+              ) : (
+                <>
+                  <Play size={13} fill="currentColor" /> Bắt đầu
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={recordLap}
+              disabled={swTime === 0}
+              className="flex-2 min-w-[130px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 text-slate-900 font-extrabold text-xs uppercase tracking-wider shadow-lg shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
+            >
+              Bấm Vòng • Ghi {nextSlot}
+            </button>
+
+            <button
+              type="button"
+              onClick={resetStopwatch}
+              className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white transition-all active:scale-95 cursor-pointer"
+              title="Khởi đặt lại đồng hồ"
+            >
+              <RotateCcw size={14} />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Recent laps horizontal list */}
+      {swLaps.length > 0 && (
+        <div className="mt-4 pt-3 border-t border-indigo-500/20 flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-none py-1">
+          <span className="text-[10px] font-bold text-indigo-450 uppercase tracking-wider flex-shrink-0">
+            Lịch sử các vòng đo:
+          </span>
+          <div className="flex gap-1.5 overflow-x-auto">
+            {swLaps.slice(0, 6).map((lapSec, index) => (
+              <span
+                key={index}
+                className="inline-block bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-md"
+              >
+                👉 Vòng {swLaps.length - index}: <span className="text-indigo-100">{lapSec}s</span>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -337,73 +552,6 @@ export default function App() {
     time2: 0,
     time3: 0,
   });
-
-  // Circular Stopwatch State
-  const [swRunning, setSwRunning] = useState(false);
-  const [swTime, setSwTime] = useState(0); // in milliseconds
-  const [swLaps, setSwLaps] = useState<number[]>([]);
-  const [swLastLapTime, setSwLastLapTime] = useState<number>(0);
-  const swStartTimeRef = useRef<number>(0);
-  const swAccumulatedRef = useRef<number>(0);
-  const swIntervalRef = useRef<any>(null);
-
-  const startStopwatch = () => {
-    if (swRunning) return;
-    swStartTimeRef.current = Date.now() - swAccumulatedRef.current;
-    setSwRunning(true);
-    swIntervalRef.current = setInterval(() => {
-      const current = Date.now() - swStartTimeRef.current;
-      setSwTime(current);
-    }, 10);
-  };
-
-  const pauseStopwatch = () => {
-    if (!swRunning) return;
-    clearInterval(swIntervalRef.current);
-    swAccumulatedRef.current = swTime;
-    setSwRunning(false);
-  };
-
-  const resetStopwatch = () => {
-    clearInterval(swIntervalRef.current);
-    swStartTimeRef.current = 0;
-    swAccumulatedRef.current = 0;
-    setSwTime(0);
-    setSwRunning(false);
-    setSwLaps([]);
-    setSwLastLapTime(0);
-  };
-
-  const recordLap = () => {
-    if (swTime === 0) return;
-    const currentLapTime = swTime - swLastLapTime;
-    const lapSecs = Number((currentLapTime / 1000).toFixed(2));
-    if (lapSecs <= 0) return;
-
-    setTimeStudy((prev) => {
-      if (prev.time1 === 0) {
-        return { ...prev, time1: lapSecs };
-      } else if (prev.time2 === 0) {
-        return { ...prev, time2: lapSecs };
-      } else if (prev.time3 === 0) {
-        return { ...prev, time3: lapSecs };
-      } else {
-        // Rotates back to slot 1 and clears slot 2, 3
-        return { ...prev, time1: lapSecs, time2: 0, time3: 0 };
-      }
-    });
-
-    setSwLaps((prev) => [lapSecs, ...prev]);
-    setSwLastLapTime(swTime);
-  };
-
-  useEffect(() => {
-    return () => {
-      if (swIntervalRef.current) {
-        clearInterval(swIntervalRef.current);
-      }
-    };
-  }, []);
 
   // Form States
   const [newLog, setNewLog] = useState({
@@ -1041,7 +1189,6 @@ export default function App() {
     await addDocToFirestore("timeStudies", record);
     setTimeStudy({ ...timeStudy, operationId2: "", time1: 0, time2: 0, time3: 0 });
     setTsSelectedLine("");
-    resetStopwatch();
     alert("Đã lưu kết quả nghiên cứu (đã cộng thêm 20% thời gian bù hao)!");
   };
 
@@ -2664,145 +2811,23 @@ export default function App() {
                         </label>
                       </div>
 
-                      {/* Premium Circular Stopwatch Terminal */}
-                      <div className="bg-gradient-to-br from-indigo-950 via-slate-900 to-indigo-900 text-white rounded-3xl p-6 shadow-xl border border-indigo-500/20 relative overflow-hidden">
-                        {/* Decorative background lights */}
-                        <div className="absolute -right-10 -bottom-10 w-40 h-40 bg-indigo-500/10 rounded-full blur-3xl pointer-events-none" />
-                        <div className="absolute -left-10 -top-10 w-40 h-40 bg-indigo-600/10 rounded-full blur-3xl pointer-events-none" />
-
-                        <div className="flex flex-col sm:flex-row items-center gap-6 relative z-10">
-                          {/* Circular progress dial */}
-                          <div className="relative flex-shrink-0 flex items-center justify-center w-36 h-36">
-                            <svg className="w-full h-full transform -rotate-90">
-                              {/* Background track circle */}
-                              <circle
-                                cx="72"
-                                cy="72"
-                                r="55"
-                                className="stroke-indigo-950/50 fill-transparent"
-                                strokeWidth="8"
-                              />
-                              {/* Glowing active animated indicator */}
-                              <circle
-                                cx="72"
-                                cy="72"
-                                r="55"
-                                className="stroke-indigo-400 fill-transparent transition-all duration-75"
-                                strokeWidth="8"
-                                strokeDasharray={2 * Math.PI * 55}
-                                strokeDashoffset={
-                                  2 * Math.PI * 55 -
-                                  ((swTime % 60000) / 60000) * (2 * Math.PI * 55)
-                                }
-                                strokeLinecap="round"
-                              />
-                            </svg>
-                            {/* Inner Digital display */}
-                            <div className="absolute flex flex-col items-center justify-center">
-                              <span className="text-2xl font-black font-mono tracking-tight text-white drop-shadow-md">
-                                {(() => {
-                                  // MS to MM:SS.CC
-                                  const totalCentiseconds = Math.floor(swTime / 10);
-                                  const cs = String(totalCentiseconds % 100).padStart(2, "0");
-                                  const totalSeconds = Math.floor(swTime / 1000);
-                                  const ss = String(totalSeconds % 60).padStart(2, "0");
-                                  const mm = String(Math.floor(totalSeconds / 60)).padStart(2, "0");
-                                  
-                                  if (totalSeconds < 60) {
-                                    return `${ss}.${cs}s`;
-                                  }
-                                  return `${mm}:${ss}.${cs}`;
-                                })()}
-                              </span>
-                              <span className="text-[9px] font-bold text-indigo-300 uppercase tracking-widest mt-0.5">
-                                {swRunning ? "🏃 ĐANG CHẠY" : "⏹️ TẠM DỪNG"}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Control Stack */}
-                          <div className="flex-1 w-full flex flex-col justify-between self-stretch">
-                            <div>
-                              <div className="text-indigo-200 text-xs font-bold uppercase tracking-wider mb-1 flex items-center gap-1.5">
-                                <Timer size={14} className="text-indigo-400 animate-pulse" />
-                                Thiết bị đo chu kỳ xoay vòng
-                              </div>
-                              <p className="text-[11px] text-indigo-200/80 leading-relaxed mb-4">
-                                Bấm <strong className="text-white">Bắt đầu</strong>, sau đó nhấn <strong className="text-white">Bấm Vòng</strong> mỗi lần thao tác kết thúc để tự động thu thập lần đo.
-                              </p>
-                            </div>
-
-                            <div className="flex flex-wrap gap-2 mt-auto">
-                              <button
-                                type="button"
-                                onClick={swRunning ? pauseStopwatch : startStopwatch}
-                                className={`flex-1 min-w-[100px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
-                                  swRunning
-                                    ? "bg-amber-500 hover:bg-amber-400 text-slate-900 active:scale-95"
-                                    : "bg-indigo-500 hover:bg-indigo-400 text-white shadow-lg shadow-indigo-600/30 active:scale-95"
-                                }`}
-                              >
-                                {swRunning ? (
-                                  <>
-                                    <Pause size={13} fill="currentColor" /> Tạm dừng
-                                  </>
-                                ) : (
-                                  <>
-                                    <Play size={13} fill="currentColor" /> Bắt đầu
-                                  </>
-                                )}
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={recordLap}
-                                disabled={swTime === 0}
-                                className="flex-2 min-w-[130px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 text-slate-900 font-extrabold text-xs uppercase tracking-wider shadow-lg shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
-                              >
-                                {(() => {
-                                  const nextSlot =
-                                    timeStudy.time1 === 0
-                                      ? "Lần 1"
-                                      : timeStudy.time2 === 0
-                                        ? "Lần 2"
-                                        : timeStudy.time3 === 0
-                                          ? "Lần 3"
-                                          : "Vòng 1";
-                                  return `Bấm Vòng • Ghi ${nextSlot}`;
-                                })()}
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={resetStopwatch}
-                                className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white transition-all active:scale-95 cursor-pointer"
-                                title="Khởi đặt lại đồng hồ"
-                              >
-                                <RotateCcw size={14} />
-                              </button>
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Recent laps horizontal list */}
-                        {swLaps.length > 0 && (
-                          <div className="mt-4 pt-3 border-t border-indigo-500/20 flex items-center gap-2 overflow-x-auto whitespace-nowrap scrollbar-none py-1">
-                            <span className="text-[10px] font-bold text-indigo-450 uppercase tracking-wider flex-shrink-0">
-                              Lịch sử các vòng đo:
-                            </span>
-                            <div className="flex gap-1.5 overflow-x-auto">
-                              {swLaps.slice(0, 6).map((lapSec, index) => (
-                                <span
-                                  key={index}
-                                  className="inline-block bg-indigo-950/60 border border-indigo-500/30 text-indigo-300 text-[10px] font-bold px-2 py-0.5 rounded-md"
-                                >
-                                  👉 Vòng {swLaps.length - index}: <span className="text-indigo-100">{lapSec}s</span>
-                                </span>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                      {/* Premium Circular Stopwatch Terminal Component */}
+                      <StopwatchTerminal
+                        timeStudy={timeStudy}
+                        onLap={(lapSecs) => {
+                          setTimeStudy((prev) => {
+                            if (prev.time1 === 0) {
+                              return { ...prev, time1: lapSecs };
+                            } else if (prev.time2 === 0) {
+                              return { ...prev, time2: lapSecs };
+                            } else if (prev.time3 === 0) {
+                              return { ...prev, time3: lapSecs };
+                            } else {
+                              return { ...prev, time1: lapSecs, time2: 0, time3: 0 };
+                            }
+                          });
+                        }}
+                      />
 
                       <div className="grid grid-cols-3 gap-4">
                         {["time1", "time2", "time3"].map((key, i) => (
