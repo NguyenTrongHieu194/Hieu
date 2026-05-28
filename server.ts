@@ -6,24 +6,23 @@ import dotenv from "dotenv";
 
 dotenv.config();
 
-async function startServer() {
-  const app = express();
-  const PORT = 3000;
+const app = express();
+const PORT = 3000;
 
-  app.use(express.json({ limit: "50mb" }));
+app.use(express.json({ limit: "50mb" }));
 
-  const ai = new GoogleGenAI({
-    apiKey: process.env.GEMINI_API_KEY || "DUMMY_KEY",
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      }
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || "DUMMY_KEY",
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
     }
-  });
-
-  if (!process.env.GEMINI_API_KEY) {
-    console.warn("WARNING: GEMINI_API_KEY is not set in environment variables. AI features will fail.");
   }
+});
+
+if (!process.env.GEMINI_API_KEY) {
+  console.warn("WARNING: GEMINI_API_KEY is not set in environment variables. AI features will fail.");
+}
 
   // API Route for AI Extraction - Operations
   app.post("/api/extract-operation", async (req, res) => {
@@ -350,24 +349,31 @@ async function startServer() {
     }
   });
 
-  // Vite middleware for development
-  if (process.env.NODE_ENV !== "production") {
-    const vite = await createViteServer({
-      server: { middlewareMode: true },
-      appType: "spa",
-    });
-    app.use(vite.middlewares);
-  } else {
-    const distPath = path.join(process.cwd(), "dist");
-    app.use(express.static(distPath));
-    app.get("*", (req, res) => {
-      res.sendFile(path.join(distPath, "index.html"));
-    });
+  // Export app as default for Serverless Environments (Vercel)
+  export default app;
+
+  // Only bind port and run file server if not on Vercel serverless functions
+  if (!process.env.VERCEL) {
+    async function startLocalServer() {
+      // Vite middleware for development
+      if (process.env.NODE_ENV !== "production") {
+        const vite = await createViteServer({
+          server: { middlewareMode: true },
+          appType: "spa",
+        });
+        app.use(vite.middlewares);
+      } else {
+        const distPath = path.join(process.cwd(), "dist");
+        app.use(express.static(distPath));
+        app.get("*", (req, res) => {
+          res.sendFile(path.join(distPath, "index.html"));
+        });
+      }
+
+      app.listen(PORT, "0.0.0.0", () => {
+        console.log(`Server running on http://localhost:${PORT}`);
+      });
+    }
+
+    startLocalServer();
   }
-
-  app.listen(PORT, "0.0.0.0", () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-  });
-}
-
-startServer();
