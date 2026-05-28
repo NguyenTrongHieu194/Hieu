@@ -728,39 +728,71 @@ export default function App() {
       const reader = new FileReader();
       reader.readAsDataURL(file);
       reader.onload = (event) => {
+        const originalBase64 = (event.target?.result as string || "").split(",")[1] || "";
+        
         const img = new Image();
         img.src = event.target?.result as string;
         img.onload = () => {
-          const canvas = document.createElement("canvas");
-          let width = img.width;
-          let height = img.height;
-          const MAX_SIZE = 1200;
+          try {
+            const canvas = document.createElement("canvas");
+            let width = img.width;
+            let height = img.height;
+            const MAX_SIZE = 1200;
 
-          if (width > height) {
-            if (width > MAX_SIZE) {
-              height *= MAX_SIZE / width;
-              width = MAX_SIZE;
+            if (width <= 0 || height <= 0) {
+              resolve(originalBase64);
+              return;
             }
-          } else {
-            if (height > MAX_SIZE) {
-              width *= MAX_SIZE / height;
-              height = MAX_SIZE;
+
+            if (width > height) {
+              if (width > MAX_SIZE) {
+                height *= MAX_SIZE / width;
+                width = MAX_SIZE;
+              }
+            } else {
+              if (height > MAX_SIZE) {
+                width *= MAX_SIZE / height;
+                height = MAX_SIZE;
+              }
             }
+
+            canvas.width = width;
+            canvas.height = height;
+            const ctx = canvas.getContext("2d");
+            if (!ctx) {
+              resolve(originalBase64);
+              return;
+            }
+            ctx.drawImage(img, 0, 0, width, height);
+
+            // Attempt to get compressed jpeg with quality parameter
+            try {
+              const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+              const base64 = dataUrl.split(",")[1];
+              resolve(base64);
+            } catch (innerError) {
+              // Try without the quality parameter to support older/buggy browsers
+              try {
+                const dataUrl = canvas.toDataURL("image/jpeg");
+                const base64 = dataUrl.split(",")[1];
+                resolve(base64);
+              } catch (lastResortError) {
+                // If anything fails in canvas context or toDataURL, fallback to original uncompressed base64
+                resolve(originalBase64);
+              }
+            }
+          } catch (error) {
+            console.warn("Canvas compression failed, falling back to original base64:", error);
+            resolve(originalBase64);
           }
-
-          canvas.width = width;
-          canvas.height = height;
-          const ctx = canvas.getContext("2d");
-          ctx?.drawImage(img, 0, 0, width, height);
-
-          // Quality 0.7 for good balance between size and OCR quality
-          const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
-          const base64 = dataUrl.split(",")[1];
-          resolve(base64);
         };
-        img.onerror = reject;
+        img.onerror = () => {
+          resolve(originalBase64);
+        };
       };
-      reader.onerror = reject;
+      reader.onerror = () => {
+        reject(new Error("Không thể đọc tệp tin"));
+      };
     });
   };
 
