@@ -11,25 +11,39 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
 
-const ai = new GoogleGenAI({
-  apiKey: process.env.GEMINI_API_KEY || "DUMMY_KEY",
-  httpOptions: {
-    headers: {
-      'User-Agent': 'aistudio-build',
-    }
-  }
-});
+let aiClient: GoogleGenAI | null = null;
 
-if (!process.env.GEMINI_API_KEY) {
-  console.warn("WARNING: GEMINI_API_KEY is not set in environment variables. AI features will fail.");
+function getGoogleGenAI(): GoogleGenAI {
+  if (!aiClient) {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) {
+      throw new Error("Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thêm biến môi trường này (GEMINI_API_KEY) trong phần thiết lập (Settings -> Environment Variables) của Vercel.");
+    }
+    
+    // Validate key pattern so we throw a clean human-readable error instead of "The string did not match the expected pattern"
+    if (!apiKey.startsWith("AIzaSy") || apiKey.length < 20) {
+      throw new Error("Khóa GEMINI_API_KEY không hợp lệ (khóa thường bắt đầu bằng 'AIzaSy'). Vui lòng kiểm tra lại cấu hình trên Vercel.");
+    }
+
+    aiClient = new GoogleGenAI({
+      apiKey: apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+  }
+  return aiClient;
 }
+
 
   // API Route for AI Extraction - Operations
   app.post("/api/extract-operation", async (req, res) => {
     console.log("POST /api/extract-operation - Request received");
     if (!process.env.GEMINI_API_KEY) {
       console.error("AI Error: GEMINI_API_KEY is missing from environment");
-      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên máy chủ." });
+      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thêm biến môi trường này (GEMINI_API_KEY) trong phần thiết lập (Project Settings > Environment Variables) của Vercel." });
     }
     try {
       const { image, mimeType } = req.body;
@@ -38,10 +52,12 @@ if (!process.env.GEMINI_API_KEY) {
         return res.status(400).json({ error: "No image provided" });
       }
 
-      // Clean base64 string - remove any whitespace or potential prefix
-      const cleanBase64 = typeof image === 'string' 
-        ? image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/[\s\r\n]/g, "") 
-        : "";
+      // Clean base64 string - safety split and remove whitespace
+      let cleanBase64 = typeof image === 'string' ? image : "";
+      if (cleanBase64.includes(",")) {
+        cleanBase64 = cleanBase64.split(",")[1];
+      }
+      cleanBase64 = cleanBase64.replace(/[\s\r\n]/g, "");
 
       if (!cleanBase64) {
         return res.status(400).json({ error: "Invalid image data" });
@@ -60,7 +76,7 @@ if (!process.env.GEMINI_API_KEY) {
         Return ONLY a JSON array of objects with these keys: name, code, style, sam, target.
       `;
 
-      const result = await ai.models.generateContent({
+      const result = await getGoogleGenAI().models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
@@ -134,7 +150,7 @@ if (!process.env.GEMINI_API_KEY) {
     console.log("POST /api/extract-worker - Request received");
     if (!process.env.GEMINI_API_KEY) {
       console.error("AI Error: GEMINI_API_KEY is missing from environment");
-      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên máy chủ." });
+      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thêm biến môi trường này (GEMINI_API_KEY) trong phần thiết lập (Project Settings > Environment Variables) của Vercel." });
     }
     try {
       const { image, mimeType } = req.body;
@@ -143,10 +159,12 @@ if (!process.env.GEMINI_API_KEY) {
         return res.status(400).json({ error: "No image provided" });
       }
 
-      // Clean base64 string
-      const cleanBase64 = typeof image === 'string' 
-        ? image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/[\s\r\n]/g, "") 
-        : "";
+      // Clean base64 string - safety split and remove whitespace
+      let cleanBase64 = typeof image === 'string' ? image : "";
+      if (cleanBase64.includes(",")) {
+        cleanBase64 = cleanBase64.split(",")[1];
+      }
+      cleanBase64 = cleanBase64.replace(/[\s\r\n]/g, "");
 
       if (!cleanBase64) {
         return res.status(400).json({ error: "Invalid image data" });
@@ -164,7 +182,7 @@ if (!process.env.GEMINI_API_KEY) {
         Return ONLY a JSON array of objects with these keys: name, code, line, skills.
       `;
 
-      const result = await ai.models.generateContent({
+      const result = await getGoogleGenAI().models.generateContent({
         model: "gemini-3-flash-preview",
         contents: [{
           parts: [
@@ -237,7 +255,7 @@ if (!process.env.GEMINI_API_KEY) {
     console.log("POST /api/extract-efficiency-board - Request received");
     if (!process.env.GEMINI_API_KEY) {
       console.error("AI Error: GEMINI_API_KEY is missing from environment");
-      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên máy chủ." });
+      return res.status(500).json({ error: "Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thêm biến môi trường này (GEMINI_API_KEY) trong phần thiết lập (Project Settings > Environment Variables) của Vercel." });
     }
     try {
       const { image, mimeType } = req.body;
@@ -246,10 +264,12 @@ if (!process.env.GEMINI_API_KEY) {
         return res.status(400).json({ error: "No image provided" });
       }
 
-      // Clean base64 string
-      const cleanBase64 = typeof image === 'string' 
-        ? image.replace(/^data:image\/[a-z]+;base64,/, "").replace(/[\s\r\n]/g, "") 
-        : "";
+      // Clean base64 string - safety split and remove whitespace
+      let cleanBase64 = typeof image === 'string' ? image : "";
+      if (cleanBase64.includes(",")) {
+        cleanBase64 = cleanBase64.split(",")[1];
+      }
+      cleanBase64 = cleanBase64.replace(/[\s\r\n]/g, "");
 
       if (!cleanBase64) {
         return res.status(400).json({ error: "Invalid image data" });
@@ -272,7 +292,7 @@ if (!process.env.GEMINI_API_KEY) {
         Return ONLY a JSON object indicating these details. Ensure numerical fields are parsed as numbers.
       `;
 
-      const result = await ai.models.generateContent({
+      const result = await getGoogleGenAI().models.generateContent({
         model: "gemini-3.5-flash",
         contents: [{
           parts: [
