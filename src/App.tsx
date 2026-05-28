@@ -582,6 +582,27 @@ export default function App() {
   const [isExtractingWorker, setIsExtractingWorker] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const workerFileInputRef = useRef<HTMLInputElement>(null);
+
+  // --- Hourly %EFF Production Board AI Calculator States ---
+  const [prodSubTab, setProdSubTab] = useState<"manual" | "eff_hourly">("manual");
+  const [isExtractingEff, setIsExtractingEff] = useState(false);
+  const effFileInputRef = useRef<HTMLInputElement>(null);
+  
+  const [effLine, setEffLine] = useState("464");
+  const [effStyle, setEffStyle] = useState("NESS 0351 W/10/022-B");
+  const [effSam, setEffSam] = useState<number>(8.915);
+  const [effOperators, setEffOperators] = useState<number>(18);
+  
+  const [effHourlyLogs, setEffHourlyLogs] = useState([
+    { id: "1", time: "08:30", target: 95, actual: 55 },
+    { id: "2", time: "09:30", target: 95, actual: 55 },
+    { id: "3", time: "10:30", target: 95, actual: 50 },
+    { id: "4", time: "11:30", target: 95, actual: 60 },
+    { id: "5", time: "13:30", target: 95, actual: 57 },
+    { id: "6", time: "14:30", target: 95, actual: 57 },
+    { id: "7", time: "15:30", target: 95, actual: 58 },
+    { id: "8", time: "16:30", target: 95, actual: 58 },
+  ]);
   const [newOrder, setNewOrder] = useState({
     customer: "",
     style: "",
@@ -1120,6 +1141,130 @@ export default function App() {
       setIsExtracting(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
     }
+  };
+
+  // --- Hourly %EFF Board AI Calculator Action Utilities ---
+  const handleEffBoardUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file || !user) return;
+
+    setIsExtractingEff(true);
+    try {
+      let base64 = "";
+      let mimeType = "image/jpeg";
+
+      if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+        const reader = new FileReader();
+        base64 = await new Promise((resolve, reject) => {
+          reader.onload = () => resolve((reader.result as string).split(",")[1]);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        mimeType = "application/pdf";
+      } else {
+        base64 = await compressImage(file);
+        mimeType = "image/jpeg";
+      }
+
+      const response = await fetch("/api/extract-efficiency-board", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ image: base64, mimeType }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || "Không thể phân tích dữ liệu bảng");
+      }
+
+      if (data) {
+        if (data.line) setEffLine(data.line.toString());
+        if (data.style) setEffStyle(data.style.toString());
+        if (data.sam) setEffSam(Number(data.sam) || 0);
+        if (data.operators) setEffOperators(Number(data.operators) || 0);
+        
+        if (Array.isArray(data.hourlyLogs) && data.hourlyLogs.length > 0) {
+          const formattedLogs = data.hourlyLogs.map((log: any, index: number) => ({
+            id: (index + 1).toString(),
+            time: log.time?.toString() || `${(8 + index).toString().padStart(2, "0")}:30`,
+            target: typeof log.target === 'number' ? log.target : 95,
+            actual: typeof log.actual === 'number' ? log.actual : 0,
+          }));
+          setEffHourlyLogs(formattedLogs);
+        }
+        alert("Đã hoàn thành phân tích ảnh bằng AI! Dữ liệu đã được bóc tách và nạp tự động vào bảng tính.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      alert(err.message || "Lỗi khi xử lý hình ảnh với AI. Vui lòng kiểm tra và thử lại.");
+    } finally {
+      setIsExtractingEff(false);
+      if (effFileInputRef.current) effFileInputRef.current.value = "";
+    }
+  };
+
+  const handleAddNewHour = () => {
+    setEffHourlyLogs((prev) => {
+      const nextId = (prev.length > 0 ? Math.max(...prev.map(p => Number(p.id) || 0)) + 1 : 1).toString();
+      let nextTime = "17:30";
+      if (prev.length > 0) {
+        const lastTime = prev[prev.length - 1].time;
+        if (lastTime.includes(":")) {
+          const match = lastTime.match(/(\d+):(\d+)/);
+          if (match) {
+            const h = parseInt(match[1], 10);
+            const m = match[2];
+            const nh = (h >= 23 ? 0 : h + 1).toString().padStart(2, "0");
+            nextTime = `${nh}:${m}`;
+          }
+        }
+      }
+      return [...prev, { id: nextId, time: nextTime, target: 95, actual: 0 }];
+    });
+  };
+
+  const handleUpdateHourRow = (id: string, field: "time" | "target" | "actual", value: any) => {
+    setEffHourlyLogs((prev) =>
+      prev.map((log) => {
+        if (log.id === id) {
+          if (field === "target" || field === "actual") {
+            return { ...log, [field]: Number(value) || 0 };
+          }
+          return { ...log, [field]: value };
+        }
+        return log;
+      })
+    );
+  };
+
+  const handleDeleteHourRow = (id: string) => {
+    setEffHourlyLogs((prev) => prev.filter((log) => log.id !== id));
+  };
+
+  const handleClearEffBoard = () => {
+    if (window.confirm("Bạn có chắc chắn muốn xóa sạch dữ liệu hiện tại để thiết lập bảng trắng mới từ đầu?")) {
+      setEffLine("");
+      setEffStyle("");
+      setEffSam(0);
+      setEffOperators(0);
+      setEffHourlyLogs([
+        { id: "1", time: "08:30", target: 95, actual: 0 },
+        { id: "2", time: "09:30", target: 95, actual: 0 },
+        { id: "3", time: "10:30", target: 95, actual: 0 },
+        { id: "4", time: "11:30", target: 95, actual: 0 },
+        { id: "5", time: "13:30", target: 95, actual: 0 },
+        { id: "6", time: "14:30", target: 95, actual: 0 },
+        { id: "7", time: "15:30", target: 95, actual: 0 },
+        { id: "8", time: "16:30", target: 95, actual: 0 },
+      ]);
+    }
+  };
+
+  const computeEffPercent = (actual: number, sam: number, operators: number) => {
+    if (sam <= 0 || operators <= 0) return 0;
+    const effFraction = (actual * sam) / (operators * 60);
+    return Math.round(effFraction * 1000) / 10; // decimal notation up to 1 decimal place, e.g. 45.4
   };
 
   const handleAddOrder = async () => {
@@ -2075,7 +2220,33 @@ export default function App() {
                 exit={{ opacity: 0, scale: 0.98 }}
                 className="space-y-6"
               >
-                <div className="grid grid-cols-1 gap-6">
+                {/* Modern Inner Sub-Tab Mode Selector */}
+                <div className="flex bg-gray-100 p-1.5 rounded-2xl w-full sm:w-fit gap-1 shadow-inner/5">
+                  <button
+                    onClick={() => setProdSubTab("manual")}
+                    className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all select-none cursor-pointer border-0 ${
+                      prodSubTab === "manual"
+                        ? "bg-white text-indigo-600 shadow-sm"
+                        : "text-gray-500 hover:text-gray-850 bg-transparent"
+                    }`}
+                  >
+                     Ghi nhận thủ công
+                  </button>
+                  <button
+                    onClick={() => setProdSubTab("eff_hourly")}
+                    className={`flex-1 sm:flex-initial flex items-center justify-center gap-2 px-6 py-3 rounded-xl font-bold text-xs uppercase tracking-wider transition-all select-none cursor-pointer border-0 ${
+                      prodSubTab === "eff_hourly"
+                        ? "bg-white text-indigo-600 shadow-sm"
+                        : "text-gray-500 hover:text-gray-850 bg-transparent"
+                    }`}
+                  >
+                    ⚡ Tiện ích tính %EFF Giờ (Từ ảnh)
+                  </button>
+                </div>
+
+                {prodSubTab === "manual" && (
+                  <>
+                    <div className="grid grid-cols-1 gap-6">
                   {/* Simplified Manual Input */}
                   <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
                     <div className="flex items-center gap-3 mb-8">
@@ -2429,6 +2600,382 @@ export default function App() {
                     </div>
                   </div>
                 </div>
+                  </>
+                )}
+
+                {prodSubTab === "eff_hourly" && (
+                  <div className="space-y-6">
+                    {/* Drag-and-drop Image Upload Section */}
+                    <div className="bg-white p-8 rounded-2xl border border-gray-100 shadow-sm">
+                      <div className="flex flex-col md:flex-row items-center justify-between gap-6 border-b border-gray-50 pb-6 mb-6">
+                        <div>
+                          <h3 className="text-xl font-bold font-serif italic text-indigo-900 flex items-center gap-2">
+                            ⚡ Phân tích bảng sản lượng & Tính %EFF
+                          </h3>
+                          <p className="text-sm text-gray-500 mt-1">
+                            Chụp ảnh bảng theo dõi năng suất bằng phấn vẽ hoặc bút lông. AI sẽ tự động phân tích các mốc giờ, chỉ tiêu và số lượng may được để tính hiệu suất chính xác.
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-3">
+                          <input
+                            type="file"
+                            ref={effFileInputRef}
+                            className="hidden"
+                            accept="image/*"
+                            onChange={handleEffBoardUpload}
+                          />
+                          <button
+                            onClick={() => effFileInputRef.current?.click()}
+                            disabled={isExtractingEff}
+                            className="flex items-center gap-2 px-6 py-4 rounded-xl bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs uppercase tracking-wider shadow-lg shadow-indigo-100 select-none cursor-pointer duration-200 disabled:opacity-50 border-0"
+                          >
+                            {isExtractingEff ? (
+                              <Loader2 className="animate-spin" size={16} />
+                            ) : (
+                              <FileUp size={16} />
+                            )}
+                            {isExtractingEff ? "AI Đang phân tích..." : "Tự động Nhập từ Ảnh"}
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Line Master Parameters Input Area */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                            Tên chuyền (Line)
+                          </label>
+                          <input
+                            type="text"
+                            value={effLine}
+                            onChange={(e) => setEffLine(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            placeholder="Nhập chuyền..."
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                            Mã hàng (Style)
+                          </label>
+                          <input
+                            type="text"
+                            value={effStyle}
+                            onChange={(e) => setEffStyle(e.target.value)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            placeholder="Nhập mã hàng..."
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                            Định mức cơ bản (SAM)
+                          </label>
+                          <input
+                            type="number"
+                            step="0.001"
+                            value={effSam === 0 ? "" : effSam}
+                            onChange={(e) => setEffSam(Number(e.target.value) || 0)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none text-indigo-600 font-mono"
+                            placeholder="Ví dụ: 8.915"
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                            Số người vận hành
+                          </label>
+                          <input
+                            type="number"
+                            value={effOperators === 0 ? "" : effOperators}
+                            onChange={(e) => setEffOperators(Number(e.target.value) || 0)}
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none text-indigo-600 font-mono"
+                            placeholder="Thợ phụ + may..."
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Left/Right layouts */}
+                    <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                      {/* Interactive table grid - 2 columns */}
+                      <div className="lg:col-span-2 bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-4">
+                        <div className="flex items-center justify-between border-b border-gray-50 pb-4">
+                          <h4 className="text-sm font-black uppercase text-gray-400 tracking-widest">
+                            Số liệu May & %EFF thực tế từng giờ
+                          </h4>
+                          <span className="text-[10px] text-indigo-600 font-bold bg-indigo-50 px-2.5 py-1 rounded-lg">
+                            Công thức: (may_được * SAM) / (người * 60) * 100%
+                          </span>
+                        </div>
+
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left">
+                            <thead>
+                              <tr className="text-[10px] font-black text-gray-400 uppercase tracking-widest border-b border-gray-100">
+                                <th className="pb-3 px-2 w-12 text-center">STT</th>
+                                <th className="pb-3 px-2 w-28">Giờ làm việc</th>
+                                <th className="pb-3 px-2 text-center w-28 border-l border-r border-gray-50">Chỉ tiêu (pcs)</th>
+                                <th className="pb-3 px-2 text-center w-28">May được (pcs)</th>
+                                <th className="pb-3 px-2 text-center">% Hoàn thành</th>
+                                <th className="pb-3 px-2 text-center">% Hiệu suất (%EFF)</th>
+                                <th className="pb-3 px-2 text-right w-12"></th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-50">
+                              {effHourlyLogs.map((log, index) => {
+                                const targetAchievement = log.target > 0 
+                                  ? Math.round((log.actual / log.target) * 100) 
+                                  : 0;
+                                const effPercent = computeEffPercent(log.actual, effSam, effOperators);
+                                
+                                // Beautiful matching badges
+                                let effBadgeClass = "bg-rose-50 text-rose-600 border border-rose-100";
+                                if (effPercent >= 85) {
+                                  effBadgeClass = "bg-emerald-50 text-emerald-600 border border-emerald-100";
+                                } else if (effPercent >= 70) {
+                                  effBadgeClass = "bg-indigo-50 text-indigo-600 border border-indigo-100";
+                                } else if (effPercent >= 50) {
+                                  effBadgeClass = "bg-amber-50 text-amber-600 border border-amber-100";
+                                }
+
+                                return (
+                                  <tr key={log.id} className="hover:bg-gray-50/50 transition-colors">
+                                    <td className="py-2.5 px-2 text-center font-mono text-xs text-gray-400">
+                                      {index + 1}
+                                    </td>
+                                    <td className="py-2.5 px-2">
+                                      <input
+                                        type="text"
+                                        value={log.time}
+                                        onChange={(e) => handleUpdateHourRow(log.id, "time", e.target.value)}
+                                        className="w-full px-2 py-1.5 rounded-lg border border-transparent hover:border-gray-200 focus:border-indigo-500 bg-transparent focus:bg-white text-xs font-bold text-gray-700 text-left"
+                                      />
+                                    </td>
+                                    <td className="py-2.5 px-2 text-center border-l border-r border-gray-50/60">
+                                      <input
+                                        type="number"
+                                        value={log.target}
+                                        onChange={(e) => handleUpdateHourRow(log.id, "target", e.target.value)}
+                                        className="w-20 px-2 py-1.5 rounded-lg border border-transparent hover:border-gray-200 focus:border-indigo-500 bg-transparent focus:bg-white text-xs font-bold text-gray-700 text-center font-mono"
+                                      />
+                                    </td>
+                                    <td className="py-2.5 px-2 text-center">
+                                      <input
+                                        type="number"
+                                        value={log.actual}
+                                        onChange={(e) => handleUpdateHourRow(log.id, "actual", e.target.value)}
+                                        className="w-20 px-2 py-1.5 rounded-lg border border-transparent hover:border-gray-100 focus:border-indigo-500 bg-transparent focus:bg-white text-sm font-black text-indigo-600 text-center font-mono"
+                                      />
+                                    </td>
+                                    <td className="py-2.5 px-2 text-center font-mono text-xs font-bold text-gray-600">
+                                      <span className={log.target > 0 && log.actual >= log.target ? "text-emerald-600 font-extrabold" : ""}>
+                                        {targetAchievement}%
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-2 text-center font-mono">
+                                      <span className={`px-2.5 py-1 rounded-lg text-xs font-extrabold inline-block min-w-[62px] text-center ${effBadgeClass}`}>
+                                        {effPercent}%
+                                      </span>
+                                    </td>
+                                    <td className="py-2.5 px-2 text-right">
+                                      <button
+                                        onClick={() => handleDeleteHourRow(log.id)}
+                                        className="p-1 px-2 rounded-lg text-gray-400 hover:text-rose-500 hover:bg-rose-50 border-0 bg-transparent cursor-pointer transition-colors duration-150 animate-pulse-once"
+                                        title="Xoá giờ làm này"
+                                      >
+                                        <Trash2 size={13} />
+                                      </button>
+                                    </td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* Interactive triggers */}
+                        <div className="flex gap-4 pt-4 border-t border-gray-50">
+                          <button
+                            onClick={handleAddNewHour}
+                            className="flex-1 py-3.5 px-4 rounded-xl border border-dashed border-indigo-200 hover:border-indigo-400 hover:bg-indigo-50/30 text-indigo-600 bg-transparent font-bold text-xs uppercase tracking-wider transition-all cursor-pointer text-center"
+                          >
+                            + Thêm Giờ Ghi Nhận
+                          </button>
+                          <button
+                            onClick={handleClearEffBoard}
+                            className="py-3.5 px-6 rounded-xl border border-gray-200 hover:bg-rose-50 hover:text-rose-600 text-gray-505 bg-transparent font-bold text-xs uppercase tracking-wider transition-all cursor-pointer text-center"
+                          >
+                            Xoá bảng tính
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Cumulative efficiency summary score card & recommendations */}
+                      <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm space-y-6">
+                        <h4 className="text-sm font-black uppercase text-gray-400 tracking-widest border-b border-gray-50 pb-4">
+                          Hiệu suất bình quân tích lũy
+                        </h4>
+
+                        {(() => {
+                          const totalActual = effHourlyLogs.reduce((sum, current) => sum + current.actual, 0);
+                          const totalTarget = effHourlyLogs.reduce((sum, current) => sum + current.target, 0);
+                          const targetProgress = totalTarget > 0 ? Math.round((totalActual / totalTarget) * 100) : 0;
+                          const totalHours = effHourlyLogs.length;
+                          
+                          // Overall cumulative efficiency %
+                          const cumulativeEff = (totalActual * effSam) / (effOperators * totalHours * 60) * 100;
+                          const displayEff = effSam > 0 && effOperators > 0 && totalHours > 0 
+                            ? Math.round(cumulativeEff * 10) / 10 
+                            : 0;
+
+                          let blockColor = "border-l-rose-550 text-rose-600 bg-rose-50/20";
+                          let alertMsg = "";
+                          let ratingStr = "";
+                          if (displayEff >= 85) {
+                            blockColor = "border-l-emerald-500 text-emerald-600 bg-emerald-50/20";
+                            ratingStr = "XUẤT SẮC 🌟";
+                            alertMsg = "Chuyền may đồng bộ hóa tốt, duy trì nhịp độ chuyền tối ưu! Vui lòng giữ đà sản lượng này.";
+                          } else if (displayEff >= 70) {
+                            blockColor = "border-l-indigo-500 text-indigo-600 bg-indigo-50/20";
+                            ratingStr = "ĐẠT - KHÁ 👍";
+                            alertMsg = "Cường độ sản xuất ổn định. Có thể cải thiện thêm bằng cách cân bằng công đoạn thắt nút cổ chai.";
+                          } else if (displayEff >= 50) {
+                            blockColor = "border-l-amber-500 text-amber-600 bg-amber-50/20";
+                            ratingStr = "CẦN CẢI TIẾN ⚠️";
+                            alertMsg = "Xảy ra bán thành phẩm dư thừa ứ đọng tại một số công đoạn. Nên kiểm tra và điều chuyển thợ may phụ trợ.";
+                          } else {
+                            blockColor = "border-l-rose-500 text-rose-600 bg-rose-50/20";
+                            ratingStr = "HIỆU SUẤT THẤP 🚨";
+                            alertMsg = "Hiệu suất quá thấp. Cần hỗ trợ tay nghề công nhân hoặc kiểm tra phụ liệu đầu vào bị gián đoạn khẩn cấp.";
+                          }
+
+                          return (
+                            <div className="space-y-6">
+                              <div className="flex flex-col items-center justify-center p-6 bg-gray-50/50 rounded-2xl border border-gray-100 text-center">
+                                <p className="text-[10px] font-black uppercase text-gray-400 tracking-widest mb-1">
+                                  %EFF Cumulative
+                                </p>
+                                <div className="my-2 flex items-center justify-center">
+                                  <span className="text-4xl font-extrabold font-mono tracking-tight text-indigo-900">
+                                    {displayEff}%
+                                  </span>
+                                </div>
+                                <p className="text-xs font-bold text-gray-500">
+                                  Thành tích: <span className="font-extrabold">{ratingStr}</span>
+                                </p>
+                              </div>
+
+                              <div className="grid grid-cols-2 gap-3">
+                                <div className="bg-gray-50/30 p-3.5 rounded-xl border border-gray-100">
+                                  <p className="text-[9px] font-black uppercase text-gray-400 tracking-widest">
+                                    Tổng May Được
+                                  </p>
+                                  <p className="text-lg font-black text-gray-900 mt-1 font-mono">
+                                    {totalActual} <span className="text-xs font-normal text-gray-400">pcs</span>
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50/30 p-3.5 rounded-xl border border-gray-100">
+                                  <p className="text-[9px] font-black uppercase text-gray-400 tracking-widest">
+                                    Đạt Target
+                                  </p>
+                                  <p className="text-lg font-black text-gray-905 mt-1 font-mono">
+                                    {targetProgress}%
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50/30 p-3.5 rounded-xl border border-gray-100">
+                                  <p className="text-[9px] font-black uppercase text-gray-400 tracking-widest">
+                                    Mốc giờ ghi
+                                  </p>
+                                  <p className="text-lg font-black text-gray-905 mt-1 font-mono">
+                                    {totalHours} <span className="text-xs font-normal text-gray-450">giờ</span>
+                                  </p>
+                                </div>
+                                <div className="bg-gray-50/30 p-3.5 rounded-xl border border-gray-100">
+                                  <p className="text-[9px] font-black uppercase text-gray-400 tracking-widest">
+                                    Nhân công làm
+                                  </p>
+                                  <p className="text-lg font-black text-gray-905 mt-1 font-mono">
+                                    {effOperators} <span className="text-xs font-normal text-gray-450">người</span>
+                                  </p>
+                                </div>
+                              </div>
+
+                              <div className={`p-4 rounded-xl border-l-4 ${blockColor} text-xs leading-relaxed font-semibold`}>
+                                <span className="font-black block uppercase tracking-wider mb-1 text-[10px]">Nhận định Kỹ thuật (IE)</span>
+                                {alertMsg}
+                              </div>
+                            </div>
+                          );
+                        })()}
+                      </div>
+                    </div>
+
+                    {/* Integrated Recharts Visual Analytics */}
+                    <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
+                      <h4 className="text-sm font-black uppercase text-gray-400 tracking-widest mb-6 border-b border-gray-50 pb-4">
+                        Biểu đồ phân tích xu hướng sản lượng & %EFF từng giờ
+                      </h4>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                        {/* Bar chart for output comparison */}
+                        <div className="space-y-3">
+                          <p className="text-xs font-black text-gray-400 uppercase tracking-wider text-center">
+                            So sánh Sản lượng Thực tế vs Chỉ tiêu
+                          </p>
+                          <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <BarChart
+                                data={effHourlyLogs}
+                                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis dataKey="time" stroke="#9ca3af" fontSize={10} tickLine={false} />
+                                <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} />
+                                <Tooltip 
+                                  contentStyle={{ backgroundColor: "#1e1b4b", borderRadius: "12px", border: "none", color: "#fff" }}
+                                  labelStyle={{ fontWeight: "bold" }}
+                                />
+                                <Bar dataKey="target" name="Target" fill="#e0e7ff" radius={[4, 4, 0, 0]} />
+                                <Bar dataKey="actual" name="Thực tế" fill="#4f46e5" radius={[4, 4, 0, 0]} />
+                              </BarChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+
+                        {/* Line chart for efficiency trends */}
+                        <div className="space-y-3">
+                          <p className="text-xs font-black text-gray-400 uppercase tracking-wider text-center">
+                            Đồ thị Biến thiên hiệu suất giờ (%EFF)
+                          </p>
+                          <div className="h-64">
+                            <ResponsiveContainer width="100%" height="100%">
+                              <LineChart
+                                data={effHourlyLogs.map(log => ({
+                                  ...log,
+                                  eff: computeEffPercent(log.actual, effSam, effOperators)
+                                }))}
+                                margin={{ top: 10, right: 10, left: -20, bottom: 0 }}
+                              >
+                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                <XAxis dataKey="time" stroke="#9ca3af" fontSize={10} tickLine={false} />
+                                <YAxis stroke="#9ca3af" fontSize={10} tickLine={false} />
+                                <Tooltip 
+                                  contentStyle={{ backgroundColor: "#1e1b4b", borderRadius: "12px", border: "none", color: "#fff" }}
+                                  labelStyle={{ fontWeight: "bold" }}
+                                />
+                                <Line
+                                  type="monotone"
+                                  dataKey="eff"
+                                  name="Hiệu suất %EFF"
+                                  stroke="#10b981"
+                                  strokeWidth={3}
+                                  activeDot={{ r: 8 }}
+                                />
+                              </LineChart>
+                            </ResponsiveContainer>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </motion.div>
             )}
 
