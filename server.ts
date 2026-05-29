@@ -14,17 +14,23 @@ app.use(express.json({ limit: "50mb" }));
 let aiClient: GoogleGenAI | null = null;
 
 function getGoogleGenAI(): GoogleGenAI {
-  if (!aiClient) {
-    const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) {
-      throw new Error("Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng thêm biến môi trường này (GEMINI_API_KEY) trong phần thiết lập (Settings -> Environment Variables) của Vercel.");
-    }
-    
-    // Validate key pattern so we throw a clean human-readable error instead of "The string did not match the expected pattern"
-    if (!apiKey.startsWith("AIzaSy") || apiKey.length < 20) {
-      throw new Error("Khóa GEMINI_API_KEY không hợp lệ (khóa thường bắt đầu bằng 'AIzaSy'). Vui lòng kiểm tra lại cấu hình trên Vercel.");
-    }
+  const apiKey = process.env.GEMINI_API_KEY;
+  console.log("=== DIAGNOSTIC GEMINI_API_KEY ===");
+  console.log("Key exists:", !!apiKey);
+  console.log("Key length:", apiKey ? apiKey.length : 0);
+  console.log("Key prefix (first 6 chars):", apiKey ? apiKey.substring(0, 6) : "none");
+  console.log("=================================");
 
+  if (!apiKey) {
+    throw new Error("Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ Vercel. LƯU Ý: Vercel yêu cầu bạn phải tạo một bản DEPLOY mới hoặc nhấn REDEPLOY để các biến môi trường mới cấu hình có hiệu lực!");
+  }
+  
+  // Validate key pattern so we throw a clean human-readable error instead of "The string did not match the expected pattern"
+  if (!apiKey.startsWith("AIzaSy") || apiKey.length < 20) {
+    throw new Error(`Khóa GEMINI_API_KEY không đúng định dạng (khóa của bạn bắt đầu bằng '${apiKey.substring(0, 6) || ""}' nhưng khóa Gemini hợp lệ phải bắt đầu bằng 'AIzaSy'). Vui lòng cấu hình lại và nhớ REDEPLOY trên Vercel.`);
+  }
+
+  if (!aiClient) {
     aiClient = new GoogleGenAI({
       apiKey: apiKey,
       httpOptions: {
