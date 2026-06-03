@@ -101,6 +101,11 @@ service cloud.firestore {
     // 2. Subcollections under each user
     match /users/{userId}/{collectionName}/{docId} {
       
+      // Config or settings
+      match /config/{configId} {
+        allow read, write: if isOwner(userId);
+      }
+
       // Lines
       match /lines/{lineId} {
         allow read: if isOwner(userId);

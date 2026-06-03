@@ -101,12 +101,26 @@
         "userId": { "type": "string" }
       },
       "required": ["date", "workerId", "operationId", "style", "times", "userId"]
+    },
+    "WorkspaceConfig": {
+      "title": "Workspace Configuration",
+      "description": "Integration configuration including tokens",
+      "type": "object",
+      "properties": {
+        "accessToken": { "type": "string" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["accessToken"]
     }
   },
   "firestore": {
     "users": {
       "schema": "User",
       "description": "Global user registry"
+    },
+    "users/{userId}/config": {
+      "schema": "WorkspaceConfig",
+      "description": "User's standard and workspace configurations"
     },
     "users/{userId}/lines": {
       "schema": "GarmentLine",

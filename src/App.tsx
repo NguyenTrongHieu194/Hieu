@@ -25,9 +25,12 @@ import {
   RotateCcw,
   Timer,
   AlertTriangle,
+  CloudLightning,
+  Sparkles,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
-import { auth, db, signInWithGoogle, logOut } from "./lib/firebase";
+import UtilitiesTab from "./components/UtilitiesTab";
+import { auth, db, signInWithGoogle, logOut, signInAsGuest, setCachedToken } from "./lib/firebase";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
 import {
   collection,
@@ -72,7 +75,8 @@ type Tab =
   | "operations"
   | "production"
   | "planning"
-  | "timestudy";
+  | "timestudy"
+  | "utilities";
 
 enum OperationType {
   CREATE = "create",
@@ -151,7 +155,7 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
     if (swRunning) return;
     swStartTimeRef.current = Date.now() - swAccumulatedRef.current;
     setSwRunning(true);
-    swIntervalRef.current = setInterval(() => {
+    swIntervalRef.current = window.setInterval(() => {
       const current = Date.now() - swStartTimeRef.current;
       setSwTime(current);
     }, 16); // 60 FPS is extremely smooth!
@@ -159,13 +163,13 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
 
   const pauseStopwatch = () => {
     if (!swRunning) return;
-    clearInterval(swIntervalRef.current);
+    window.clearInterval(swIntervalRef.current);
     swAccumulatedRef.current = swTime;
     setSwRunning(false);
   };
 
   const resetStopwatch = () => {
-    clearInterval(swIntervalRef.current);
+    window.clearInterval(swIntervalRef.current);
     swStartTimeRef.current = 0;
     swAccumulatedRef.current = 0;
     setSwTime(0);
@@ -189,7 +193,7 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
   // Listen to parent clear
   useEffect(() => {
     if (timeStudy.time1 === 0 && timeStudy.time2 === 0 && timeStudy.time3 === 0) {
-      clearInterval(swIntervalRef.current);
+      window.clearInterval(swIntervalRef.current);
       swStartTimeRef.current = 0;
       swAccumulatedRef.current = 0;
       setSwTime(0);
@@ -202,7 +206,7 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
   useEffect(() => {
     return () => {
       if (swIntervalRef.current) {
-        clearInterval(swIntervalRef.current);
+        window.clearInterval(swIntervalRef.current);
       }
     };
   }, []);
@@ -283,7 +287,15 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
           <div className="flex flex-wrap gap-2 mt-auto">
             <button
               type="button"
-              onClick={swRunning ? pauseStopwatch : startStopwatch}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (swRunning) {
+                  pauseStopwatch();
+                } else {
+                  startStopwatch();
+                }
+              }}
               className={`flex-1 min-w-[100px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl font-bold text-xs uppercase tracking-wider transition-all cursor-pointer ${
                 swRunning
                   ? "bg-amber-500 hover:bg-amber-400 text-slate-900 active:scale-95"
@@ -303,7 +315,11 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
 
             <button
               type="button"
-              onClick={recordLap}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                recordLap();
+              }}
               disabled={swTime === 0}
               className="flex-2 min-w-[130px] flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 disabled:opacity-40 disabled:hover:bg-emerald-500 text-slate-900 font-extrabold text-xs uppercase tracking-wider shadow-lg shadow-emerald-600/20 active:scale-95 transition-all cursor-pointer"
             >
@@ -312,7 +328,11 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
 
             <button
               type="button"
-              onClick={resetStopwatch}
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                resetStopwatch();
+              }}
               className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-gray-300 hover:text-white transition-all active:scale-95 cursor-pointer"
               title="Khởi đặt lại đồng hồ"
             >
@@ -392,8 +412,35 @@ export default function App() {
 
   // Auth Effect
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
-      setUser(u);
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
+      if (u) {
+        // Nếu đăng nhập bằng Google/Firebase thực tế, xoá trạng thái demo để đồng bộ dữ liệu chính thức
+        if (!u.isAnonymous) {
+          localStorage.removeItem("garmentops_demo_user");
+          
+          // Tự động khôi phục Access Token từ Firestore khi tải phiên
+          try {
+            const { getDoc, doc: fsDoc } = await import("firebase/firestore");
+            const tokenSnap = await getDoc(fsDoc(db, `users/${u.uid}/config/workspace`));
+            if (tokenSnap.exists()) {
+              const data = tokenSnap.data();
+              if (data && data.accessToken) {
+                setCachedToken(data.accessToken);
+              }
+            }
+          } catch (err) {
+            console.warn("Khôi phục automatic token từ Firestore thất bại:", err);
+          }
+        }
+        setUser(u);
+      } else {
+        const demoUser = localStorage.getItem("garmentops_demo_user");
+        if (demoUser) {
+          setUser(JSON.parse(demoUser));
+        } else {
+          setUser(null);
+        }
+      }
       setLoading(false);
     });
     return () => unsubscribe();
@@ -408,6 +455,28 @@ export default function App() {
       setOrders([]);
       setLogs([]);
       setTimeStudyRecords([]);
+      return;
+    }
+
+    if ((user as any).isLocalDemo) {
+      const storedLines = localStorage.getItem('garmentops_demo_lines');
+      setLines(storedLines ? JSON.parse(storedLines) : ["Chuyền 1", "Chuyền 2", "Chuyền 3"]);
+
+      const storedWorkers = localStorage.getItem('garmentops_demo_workers');
+      setWorkers(storedWorkers ? JSON.parse(storedWorkers) : []);
+
+      const storedOperations = localStorage.getItem('garmentops_demo_operations');
+      setOperations(storedOperations ? JSON.parse(storedOperations) : []);
+
+      const storedOrders = localStorage.getItem('garmentops_demo_orders');
+      setOrders(storedOrders ? JSON.parse(storedOrders) : []);
+
+      const storedLogs = localStorage.getItem('garmentops_demo_productionLogs');
+      setLogs(storedLogs ? JSON.parse(storedLogs) : []);
+
+      const storedTS = localStorage.getItem('garmentops_demo_timeStudies');
+      setTimeStudyRecords(storedTS ? JSON.parse(storedTS) : []);
+
       return;
     }
 
@@ -498,6 +567,39 @@ export default function App() {
   // Firestore Helpers
   const addDocToFirestore = async (col: string, data: any) => {
     if (!user) return;
+    if ((user as any).isLocalDemo) {
+      const newId = col + "_" + Math.random().toString(36).substr(2, 9);
+      const newItem = {
+        ...data,
+        id: newId,
+        userId: user.uid,
+        createdAt: new Date().toISOString(),
+      };
+      
+      if (col === 'workers') {
+        const next = [...workers, newItem];
+        setWorkers(next);
+        localStorage.setItem('garmentops_demo_workers', JSON.stringify(next));
+      } else if (col === 'operations') {
+        const next = [...operations, newItem];
+        setOperations(next);
+        localStorage.setItem('garmentops_demo_operations', JSON.stringify(next));
+      } else if (col === 'orders') {
+        const next = [...orders, newItem];
+        setOrders(next);
+        localStorage.setItem('garmentops_demo_orders', JSON.stringify(next));
+      } else if (col === 'productionLogs') {
+        const next = [...logs, newItem];
+        setLogs(next);
+        localStorage.setItem('garmentops_demo_productionLogs', JSON.stringify(next));
+      } else if (col === 'timeStudies') {
+        const next = [...timeStudyRecords, newItem];
+        setTimeStudyRecords(next);
+        localStorage.setItem('garmentops_demo_timeStudies', JSON.stringify(next));
+      }
+      return;
+    }
+
     const path = `users/${user.uid}/${col}`;
     try {
       await addDoc(collection(db, path), {
@@ -512,6 +614,31 @@ export default function App() {
 
   const deleteDocFromFirestore = async (col: string, id: string) => {
     if (!user) return;
+    if ((user as any).isLocalDemo) {
+      if (col === 'workers') {
+        const next = workers.filter(w => w.id !== id);
+        setWorkers(next);
+        localStorage.setItem('garmentops_demo_workers', JSON.stringify(next));
+      } else if (col === 'operations') {
+        const next = operations.filter(o => o.id !== id);
+        setOperations(next);
+        localStorage.setItem('garmentops_demo_operations', JSON.stringify(next));
+      } else if (col === 'orders') {
+        const next = orders.filter(o => o.id !== id);
+        setOrders(next);
+        localStorage.setItem('garmentops_demo_orders', JSON.stringify(next));
+      } else if (col === 'productionLogs') {
+        const next = logs.filter(l => l.id !== id);
+        setLogs(next);
+        localStorage.setItem('garmentops_demo_productionLogs', JSON.stringify(next));
+      } else if (col === 'timeStudies') {
+        const next = timeStudyRecords.filter(t => t.id !== id);
+        setTimeStudyRecords(next);
+        localStorage.setItem('garmentops_demo_timeStudies', JSON.stringify(next));
+      }
+      return;
+    }
+
     const path = `users/${user.uid}/${col}/${id}`;
     try {
       await deleteDoc(doc(db, `users/${user.uid}/${col}`, id));
@@ -522,6 +649,31 @@ export default function App() {
 
   const updateDocInFirestore = async (col: string, id: string, data: any) => {
     if (!user) return;
+    if ((user as any).isLocalDemo) {
+      if (col === 'workers') {
+        const next = workers.map(w => w.id === id ? { ...w, ...data } : w);
+        setWorkers(next);
+        localStorage.setItem('garmentops_demo_workers', JSON.stringify(next));
+      } else if (col === 'operations') {
+        const next = operations.map(o => o.id === id ? { ...o, ...data } : o);
+        setOperations(next);
+        localStorage.setItem('garmentops_demo_operations', JSON.stringify(next));
+      } else if (col === 'orders') {
+        const next = orders.map(o => o.id === id ? { ...o, ...data } : o);
+        setOrders(next);
+        localStorage.setItem('garmentops_demo_orders', JSON.stringify(next));
+      } else if (col === 'productionLogs') {
+        const next = logs.map(l => l.id === id ? { ...l, ...data } : l);
+        setLogs(next);
+        localStorage.setItem('garmentops_demo_productionLogs', JSON.stringify(next));
+      } else if (col === 'timeStudies') {
+        const next = timeStudyRecords.map(t => t.id === id ? { ...t, ...data } : t);
+        setTimeStudyRecords(next);
+        localStorage.setItem('garmentops_demo_timeStudies', JSON.stringify(next));
+      }
+      return;
+    }
+
     const path = `users/${user.uid}/${col}/${id}`;
     try {
       await updateDoc(doc(db, `users/${user.uid}/${col}`, id), data);
@@ -620,6 +772,14 @@ export default function App() {
     if (!newLineName.trim() || !user) return;
     if (lines.includes(newLineName.trim())) return;
 
+    if ((user as any).isLocalDemo) {
+      const next = [...lines, newLineName.trim()];
+      setLines(next);
+      localStorage.setItem('garmentops_demo_lines', JSON.stringify(next));
+      setNewLineName("");
+      return;
+    }
+
     try {
       await setDoc(doc(db, `users/${user.uid}/lines`, newLineName.trim()), {
         name: newLineName.trim(),
@@ -634,6 +794,12 @@ export default function App() {
   const handleDeleteLine = async (lineName: string) => {
     if (!user) return;
     if (window.confirm(`Bạn có chắc chắn muốn xoá chuyền "${lineName}"?`)) {
+      if ((user as any).isLocalDemo) {
+        const next = lines.filter((l) => l !== lineName);
+        setLines(next);
+        localStorage.setItem('garmentops_demo_lines', JSON.stringify(next));
+        return;
+      }
       try {
         await deleteDoc(doc(db, `users/${user.uid}/lines`, lineName));
       } catch (e) {
@@ -702,10 +868,16 @@ export default function App() {
     // Add to lines if not exists
     const lineName = newWorker.line.trim() || "Chuyền 1";
     if (!lines.includes(lineName)) {
-      await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
-        name: lineName,
-        userId: user.uid,
-      });
+      if ((user as any).isLocalDemo) {
+        const next = [...lines, lineName];
+        setLines(next);
+        localStorage.setItem('garmentops_demo_lines', JSON.stringify(next));
+      } else {
+        await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
+          name: lineName,
+          userId: user.uid,
+        });
+      }
     }
 
     const worker = {
@@ -815,6 +987,33 @@ export default function App() {
     }
   };
 
+  const handleGuestSignIn = async () => {
+    try {
+      await signInAsGuest();
+    } catch (error: any) {
+      console.warn("Firebase Guest auth blocked, starting standalone simulation mode:", error);
+      const guestU = {
+        uid: "local-demo-user",
+        email: "demo-user@garmentops.app",
+        displayName: "Khách Demo",
+        isAnonymous: true,
+        isLocalDemo: true
+      };
+      localStorage.setItem("garmentops_demo_user", JSON.stringify(guestU));
+      setUser(guestU as any);
+    }
+  };
+
+  const handleLogOut = async () => {
+    localStorage.removeItem("garmentops_demo_user");
+    setUser(null);
+    try {
+      await logOut();
+    } catch (e) {
+      console.error("Logout Error:", e);
+    }
+  };
+
   const handleWorkerFileUpload = async (
     event: React.ChangeEvent<HTMLInputElement>,
   ) => {
@@ -850,10 +1049,16 @@ export default function App() {
               .trim();
 
             if (!lines.includes(lineName)) {
-              await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
-                name: lineName,
-                userId: user.uid,
-              });
+              if ((user as any).isLocalDemo) {
+                const next = [...lines, lineName];
+                setLines(next);
+                localStorage.setItem('garmentops_demo_lines', JSON.stringify(next));
+              } else {
+                await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
+                  name: lineName,
+                  userId: user.uid,
+                });
+              }
             }
 
             const worker = {
@@ -942,10 +1147,16 @@ export default function App() {
         for (const item of data) {
           const lineName = (item.line || newWorker.line || "Chuyền 1").trim();
           if (!lines.includes(lineName)) {
-            await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
-              name: lineName,
-              userId: user.uid,
-            });
+            if ((user as any).isLocalDemo) {
+              const next = [...lines, lineName];
+              setLines(next);
+              localStorage.setItem('garmentops_demo_lines', JSON.stringify(next));
+            } else {
+              await setDoc(doc(db, `users/${user.uid}/lines`, lineName), {
+                name: lineName,
+                userId: user.uid,
+              });
+            }
           }
 
           const worker = {
@@ -1392,6 +1603,108 @@ export default function App() {
     await updateDocInFirestore("timeStudies", id, { needsCheck: !currentVal });
   };
 
+  const handleImportWorkers = async (newWorkers: Omit<Worker, "id">[]): Promise<number> => {
+    if (!user) return 0;
+    if ((user as any).isLocalDemo) {
+      const updatedLines = [...lines];
+      const updatedWorkers = [...workers];
+      for (const w of newWorkers) {
+        const lineName = w.line || "Chuyền 1";
+        if (!updatedLines.includes(lineName)) {
+          updatedLines.push(lineName);
+        }
+        updatedWorkers.push({
+          id: "worker_" + Math.random().toString(36).substr(2, 9),
+          name: w.name,
+          code: w.code,
+          skills: w.skills,
+          line: w.line,
+          performance: 0,
+          userId: user.uid,
+          createdAt: new Date().toISOString(),
+        } as any);
+      }
+      setLines(updatedLines);
+      localStorage.setItem('garmentops_demo_lines', JSON.stringify(updatedLines));
+      setWorkers(updatedWorkers);
+      localStorage.setItem('garmentops_demo_workers', JSON.stringify(updatedWorkers));
+      return newWorkers.length;
+    }
+
+    let count = 0;
+    try {
+      const batch = writeBatch(db);
+      for (const w of newWorkers) {
+        // Automatically ensure the line exists!
+        const lineName = w.line || "Chuyền 1";
+        if (!lines.includes(lineName)) {
+          const lineRef = doc(db, `users/${user.uid}/lines`, lineName);
+          batch.set(lineRef, { name: lineName, userId: user.uid });
+        }
+
+        const workerRef = doc(collection(db, `users/${user.uid}/workers`));
+        batch.set(workerRef, {
+          name: w.name,
+          code: w.code,
+          skills: w.skills,
+          line: w.line,
+          performance: 0,
+          userId: user.uid,
+          createdAt: Timestamp.now(),
+        });
+        count++;
+      }
+      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}/workers (batch)`);
+    }
+    return count;
+  };
+
+  const handleImportOperations = async (newOps: Omit<Operation, "id">[]): Promise<number> => {
+    if (!user) return 0;
+    if ((user as any).isLocalDemo) {
+      const updatedOps = [...operations];
+      for (const op of newOps) {
+        updatedOps.push({
+          id: "op_" + Math.random().toString(36).substr(2, 9),
+          name: op.name,
+          code: op.code,
+          style: op.style || "",
+          sam: op.sam,
+          targetPerHour: op.targetPerHour,
+          userId: user.uid,
+          createdAt: new Date().toISOString(),
+        } as any);
+      }
+      setOperations(updatedOps);
+      localStorage.setItem('garmentops_demo_operations', JSON.stringify(updatedOps));
+      return newOps.length;
+    }
+
+    let count = 0;
+    try {
+      const batch = writeBatch(db);
+      for (const op of newOps) {
+        const opRef = doc(collection(db, `users/${user.uid}/operations`));
+        batch.set(opRef, {
+          name: op.name,
+          code: op.code,
+          style: op.style || "",
+          sam: op.sam,
+          targetPerHour: op.targetPerHour,
+          userId: user.uid,
+          createdAt: Timestamp.now(),
+        });
+        count++;
+      }
+      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, `users/${user.uid}/operations (batch)`);
+    }
+    return count;
+  };
+
   // Sorting logic based on Line -> Order -> Operation -> Worker
   const getSortedLogs = () => {
     return [...logs].sort((a, b) => {
@@ -1493,6 +1806,18 @@ export default function App() {
 
     // 2. Persist the new orderIndex to Firestore using writeBatch
     if (!user) return;
+    if ((user as any).isLocalDemo) {
+      const next = timeStudyRecords.map((t) => {
+        const foundIdx = reorderedFiltered.findIndex((rf) => rf.id === t.id);
+        if (foundIdx !== -1) {
+          return { ...t, orderIndex: foundIdx };
+        }
+        return t;
+      });
+      setTimeStudyRecords(next);
+      localStorage.setItem('garmentops_demo_timeStudies', JSON.stringify(next));
+      return;
+    }
     try {
       const batch = writeBatch(db);
       for (let i = 0; i < reorderedFiltered.length; i++) {
@@ -1585,7 +1910,8 @@ export default function App() {
     { id: "operations", label: "Công đoạn", icon: Settings },
     { id: "production", label: "Sản lượng", icon: TrendingUp },
     { id: "planning", label: "Kế hoạch", icon: Calendar },
-    { id: "timestudy", label: "Bấm thời gian", icon: Clock },
+    { id: "timestudy", label: "Bấm Giờ", icon: Clock },
+    { id: "utilities", label: "Tiện ích", icon: CloudLightning },
   ];
 
   const totalOrdered = orders.reduce(
@@ -1618,15 +1944,15 @@ export default function App() {
               {format(new Date(), "dd/MM/yyyy")}
             </p>
             {user && (
-              <p className="text-[10px] text-indigo-600 font-bold">
-                {user.email}
+              <p className="text-[10px] text-indigo-700 font-black tracking-wide uppercase">
+                {(user.isAnonymous || (user as any).isLocalDemo) ? "⚡️ Khách (Demo Mode)" : user.email}
               </p>
             )}
           </div>
           {user ? (
             <button
-              onClick={logOut}
-              className="px-3 py-1.5 rounded-xl bg-gray-100 text-gray-600 hover:bg-rose-50 hover:text-rose-600 transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-widest"
+              onClick={handleLogOut}
+              className="px-3 py-1.5 rounded-xl bg-gray-100 text-gray-600 hover:bg-rose-50 hover:text-rose-600 transition-all flex items-center gap-2 text-xs font-bold uppercase tracking-widest cursor-pointer"
               title="Đăng xuất"
             >
               <LogOut size={16} />
@@ -1664,9 +1990,33 @@ export default function App() {
                   thiết bị.
                 </p>
               </div>
+
+              {typeof window !== "undefined" && window.self !== window.top && (
+                <div className="p-4 bg-indigo-50 border border-indigo-100 rounded-2xl text-[11px] text-indigo-900 text-left leading-relaxed space-y-2 shadow-sm animate-fadeIn">
+                  <span className="font-extrabold text-indigo-950 flex items-center gap-1.5 uppercase">
+                    📱 ĐANG CHẠY TRONG KHUNG XEM THỬ:
+                  </span>
+                  <p className="font-semibold text-indigo-800">
+                    Trình duyệt di động luôn tự động chặn cửa sổ Pop-up khi ứng dụng chạy trong khung iframe của <strong className="text-indigo-950 font-black">AI Studio</strong>.
+                  </p>
+                  <p className="font-bold text-indigo-900">
+                    👇 Bạn hãy nhấn vào nút dưới đây để mở ứng dụng toàn màn hình trong tab mới. Bạn sẽ đăng nhập và cập nhật dữ liệu thành công 100%!
+                  </p>
+                  <a
+                    href={window.location.href}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="w-full py-3 px-4 rounded-xl bg-indigo-600 hover:bg-indigo-500 text-white font-black transition-all flex items-center justify-center gap-1.5 text-xs shadow-md shadow-indigo-600/15"
+                  >
+                    🚀 MỞ TRONG TAB ĐỘC LẬP MỚI
+                    <ArrowUpRight size={13} />
+                  </a>
+                </div>
+              )}
+
               <button
                 onClick={handleSignIn}
-                className="w-full py-4 px-6 rounded-2xl bg-white border-2 border-gray-100 hover:border-indigo-600 transition-all flex items-center justify-center gap-4 text-gray-700 font-black shadow-sm group"
+                className="w-full py-4 px-6 rounded-2xl bg-white border-2 border-gray-100 hover:border-indigo-600 transition-all flex items-center justify-center gap-4 text-gray-700 font-black shadow-sm group cursor-pointer active:scale-[0.98]"
               >
                 <img
                   src="https://www.google.com/favicon.ico"
@@ -1675,7 +2025,35 @@ export default function App() {
                 />
                 Tiếp tục với Google
               </button>
-              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest">
+
+              <div className="relative flex py-2 items-center text-gray-400">
+                <div className="flex-grow border-t border-gray-200"></div>
+                <span className="flex-shrink mx-4 text-[9px] font-bold uppercase tracking-widest text-gray-400">Hoặc duyệt nhanh</span>
+                <div className="flex-grow border-t border-gray-200"></div>
+              </div>
+
+              <button
+                onClick={handleGuestSignIn}
+                className="w-full py-4 px-6 rounded-2xl bg-slate-900 hover:bg-slate-800 text-white font-extrabold uppercase text-xs tracking-wider transition-all flex items-center justify-center gap-2.5 shadow-md active:scale-[0.98] cursor-pointer"
+              >
+                <Sparkles size={14} className="text-amber-400 animate-pulse" />
+                Duyệt nhanh bằng Tài khoản Khách
+              </button>
+
+              <div className="p-4 bg-amber-50 border border-amber-100 rounded-2xl text-[11px] text-amber-800 text-left leading-relaxed space-y-1.5 shadow-sm">
+                <span className="font-extrabold text-amber-900 flex items-center gap-1">
+                  ⚠️ LƯU Ý KHI CẤP QUYỀN ĐĂNG NHẬP:
+                </span>
+                <p className="font-semibold">
+                  Vì ứng dụng đang chạy ở môi trường thử nghiệm, nếu Google hiển thị cửa sổ đỏ cảnh báo <strong className="text-amber-950 font-black">"Google chưa xác minh ứng dụng này"</strong>:
+                </p>
+                <ol className="list-decimal list-inside space-y-1 font-semibold pl-1">
+                  <li>Nhấn nút <strong className="text-amber-950">Nâng cao (Advanced)</strong> ở góc dưới bên trái biểu mẫu Google.</li>
+                  <li>Nhấp vào liên kết <strong className="text-amber-950 underline decoration-amber-900/40">Đi tới Garment Ops (không an toàn)</strong> để tiếp tục.</li>
+                </ol>
+              </div>
+
+              <p className="text-[10px] text-gray-400 font-bold uppercase tracking-widest pt-2">
                 Hệ thống quản lý sản xuất may mặc hiện đại
               </p>
             </motion.div>
@@ -1690,7 +2068,7 @@ export default function App() {
       </AnimatePresence>
 
       {/* Main Content Area */}
-      <main className="max-w-7xl mx-auto px-4 py-8">
+      <main className="max-w-[96%] lg:max-w-[92%] xl:max-w-[1550px] mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
         <div className="w-full">
           <AnimatePresence mode="wait">
             {activeTab === "dashboard" && (
@@ -1743,13 +2121,13 @@ export default function App() {
                     >
                       <div className="flex items-start justify-between">
                         <div>
-                          <p className="text-sm font-medium text-gray-500">
+                          <p className="text-sm sm:text-base font-bold text-gray-600 uppercase tracking-wide">
                             {stat.label}
                           </p>
-                          <h3 className="mt-2 text-3xl font-bold tracking-tight text-gray-900">
+                          <h3 className="mt-2 text-3xl sm:text-4xl font-black tracking-tight text-gray-900">
                             {stat.value}
                           </h3>
-                          <p className="mt-1 text-xs text-gray-400">
+                          <p className="mt-1 text-xs sm:text-sm text-gray-500 font-medium">
                             {stat.unit}
                           </p>
                         </div>
@@ -1964,7 +2342,7 @@ export default function App() {
                       Danh sách công nhân
                     </h4>
                     <div className="flex items-center gap-2">
-                      <span className="text-[10px] font-bold text-gray-400 uppercase">
+                      <span className="text-xs font-bold text-gray-500 uppercase">
                         Lọc theo chuyền:
                       </span>
                       <select
@@ -2216,7 +2594,7 @@ export default function App() {
                         </h4>
                         <div className="mt-6 flex items-center justify-between border-t border-gray-50 pt-4">
                           <div>
-                            <p className="text-[10px] uppercase text-gray-400 font-bold tracking-widest">
+                            <p className="text-xs uppercase text-gray-500 font-bold tracking-wider">
                               Định mức SAM
                             </p>
                             <p className="text-xl font-bold font-mono text-gray-900">
@@ -2227,7 +2605,7 @@ export default function App() {
                             </p>
                           </div>
                           <div className="text-right">
-                            <p className="text-[10px] uppercase text-gray-400 font-bold tracking-widest">
+                            <p className="text-xs uppercase text-gray-500 font-bold tracking-wider">
                               Mục tiêu/Giờ
                             </p>
                             <p className="text-xl font-bold font-mono text-gray-900">
@@ -2385,7 +2763,7 @@ export default function App() {
                       return (
                         <>
                           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm">
-                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
                               Của Job phân bổ
                             </p>
                             <p className="text-xl font-black text-gray-900">
@@ -2394,7 +2772,7 @@ export default function App() {
                             </p>
                           </div>
                           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-indigo-600">
-                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
                               Tổng may được
                             </p>
                             <p className="text-xl font-black text-indigo-600">
@@ -2403,7 +2781,7 @@ export default function App() {
                             </p>
                           </div>
                           <div className="bg-white p-6 rounded-2xl border border-gray-100 shadow-sm border-l-4 border-l-rose-500">
-                            <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-1">
+                            <p className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-1">
                               Tổng còn lại
                             </p>
                             <p className="text-xl font-black text-rose-500">
@@ -2674,31 +3052,31 @@ export default function App() {
                       {/* Line Master Parameters Input Area */}
                       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 bg-gray-50/50 p-6 rounded-2xl border border-gray-100">
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                          <label className="text-[12px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider">
                             Tên chuyền (Line)
                           </label>
                           <input
                             type="text"
                             value={effLine}
                             onChange={(e) => setEffLine(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                             placeholder="Nhập chuyền..."
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                          <label className="text-[12px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider">
                             Mã hàng (Style)
                           </label>
                           <input
                             type="text"
                             value={effStyle}
                             onChange={(e) => setEffStyle(e.target.value)}
-                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none"
                             placeholder="Nhập mã hàng..."
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                          <label className="text-[12px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider">
                             Định mức cơ bản (SAM)
                           </label>
                           <input
@@ -2706,19 +3084,19 @@ export default function App() {
                             step="0.001"
                             value={effSam === 0 ? "" : effSam}
                             onChange={(e) => setEffSam(Number(e.target.value) || 0)}
-                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none text-indigo-600 font-mono"
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none text-indigo-600 font-mono"
                             placeholder="Ví dụ: 8.915"
                           />
                         </div>
                         <div className="space-y-1">
-                          <label className="text-[10px] font-black uppercase text-gray-400 tracking-widest">
+                          <label className="text-[12px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider">
                             Số người vận hành
                           </label>
                           <input
                             type="number"
                             value={effOperators === 0 ? "" : effOperators}
                             onChange={(e) => setEffOperators(Number(e.target.value) || 0)}
-                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-bold focus:ring-2 focus:ring-indigo-500 focus:outline-none text-indigo-600 font-mono"
+                            className="w-full px-4 py-3 rounded-xl border border-gray-250 bg-white text-sm font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none text-indigo-600 font-mono"
                             placeholder="Thợ phụ + may..."
                           />
                         </div>
@@ -3236,14 +3614,14 @@ export default function App() {
                 exit={{ opacity: 0, y: -20 }}
                 className="space-y-6"
               >
-                <div className="bg-white p-8 rounded-3xl border border-gray-100 shadow-sm max-w-4xl mx-auto">
+                <div className="bg-white md:p-8 p-4 rounded-3xl border border-gray-100 shadow-sm w-full max-w-full mx-auto">
                   <div className="flex items-center gap-4 mb-8">
                     <div className="h-12 w-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center shadow-lg">
                       <Clock size={24} />
                     </div>
                     <div>
                       <h3 className="text-2xl font-bold font-serif italic text-gray-900">
-                        Bấm thời gian
+                        Bấm Giờ
                       </h3>
                       <p className="text-sm text-gray-500">
                         Nhập thời gian đo thực tế để tính toán năng suất dự kiến
@@ -3256,7 +3634,7 @@ export default function App() {
                     <div className="space-y-6 bg-gray-50/50 p-6 rounded-2xl">
                       <div className="space-y-4">
                         <div>
-                          <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">
+                          <label className="text-[13px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider mb-2 block">
                             1. Mã hàng
                           </label>
                           <select
@@ -3283,7 +3661,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">
+                          <label className="text-[13px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider mb-2 block">
                             2. Công đoạn
                           </label>
                           <select
@@ -3313,7 +3691,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">
+                          <label className="text-[13px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider mb-2 block">
                             Công đoạn gộp thêm (Không bắt buộc)
                           </label>
                           <select
@@ -3349,7 +3727,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">
+                          <label className="text-[13px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider mb-2 block">
                             3. Chuyền
                           </label>
                           <select
@@ -3370,7 +3748,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="text-xs font-bold uppercase text-gray-400 tracking-widest mb-2 block">
+                          <label className="text-[13px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider mb-2 block">
                             4. Công nhân
                           </label>
                           <select
@@ -3404,7 +3782,7 @@ export default function App() {
                     {/* Right: Time Measure Inputs */}
                     <div className="space-y-6">
                       <div className="flex items-center justify-between">
-                        <label className="text-xs font-bold uppercase text-gray-400 tracking-widest block">
+                        <label className="text-[13px] sm:text-xs font-extrabold uppercase text-gray-500 tracking-wider block">
                           5. Kết quả đo (Giây) &amp; Bấm giờ xoay vòng
                         </label>
                       </div>
@@ -3443,7 +3821,7 @@ export default function App() {
 
                           return (
                             <div key={key} className="space-y-2 flex flex-col items-center">
-                              <p className="text-[10px] text-center font-bold text-gray-400 uppercase tracking-wider">
+                              <p className="text-xs text-center font-bold text-gray-500 uppercase tracking-wider">
                                 Lần {i + 1}
                               </p>
                               
@@ -3481,7 +3859,7 @@ export default function App() {
                                       [checkKey]: !needsCheckVal,
                                     }))
                                   }
-                                  className={`text-[9.5px] w-full py-1.5 px-1.5 rounded-xl border font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer ${
+                                  className={`text-xs w-full py-2 px-1.5 rounded-xl border font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer ${
                                     needsCheckVal
                                       ? "bg-amber-150 hover:bg-amber-200 border-amber-400 text-amber-800"
                                       : "bg-gray-50 hover:bg-gray-100 border-gray-200 text-gray-500"
@@ -3500,12 +3878,12 @@ export default function App() {
                                         [checkKey]: false,
                                       }))
                                     }
-                                    className="text-[9.5px] w-full py-1.5 px-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer shadow-sm"
+                                    className="text-xs w-full py-2 px-1.5 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-600 font-bold flex items-center justify-center gap-1 transition-all active:scale-95 cursor-pointer shadow-sm"
                                   >
                                     ✕ Đặt lại (Xóa)
                                   </button>
                                 ) : (
-                                  <div className="text-[9.5px] w-full py-1.5 px-1.5 rounded-xl border border-dashed border-gray-100 text-gray-300 font-medium flex items-center justify-center gap-1 select-none">
+                                  <div className="text-xs w-full py-2 px-1.5 border border-dashed border-gray-100 text-gray-300 font-medium flex items-center justify-center gap-1 select-none">
                                     Chưa có số liệu
                                   </div>
                                 )}
@@ -3703,7 +4081,7 @@ export default function App() {
                           worker: workerName,
                           operation: opName,
                           operation2: op2?.name || "",
-                          "Năng suất (SP/Giờ)": record.targetPerHour,
+                          "Năng suất (Pcs/Giờ)": record.targetPerHour,
                           "Thời gian (Giây)": record.averageTime,
                         };
                       });
@@ -3751,7 +4129,7 @@ export default function App() {
                                     : "text-gray-500 hover:text-gray-900"
                                 }`}
                               >
-                                Năng suất (SP/Giờ)
+                                Năng suất (Pcs/Giờ)
                               </button>
                               <button
                                 onClick={() => setTsChartMetric("duration")}
@@ -3766,84 +4144,86 @@ export default function App() {
                             </div>
                           </div>
 
-                          <div className="h-[280px] w-full">
-                            <ResponsiveContainer width="100%" height="100%">
-                              <BarChart
-                                data={chartData}
-                                margin={{ top: 25, right: 10, left: -20, bottom: 35 }}
-                              >
-                                <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
-                                <XAxis
-                                  dataKey="worker"
-                                  stroke="#9CA3AF"
-                                  tick={<CustomChartTick />}
-                                  tickLine={false}
-                                  axisLine={false}
-                                  interval={0}
-                                />
-                                <YAxis stroke="#9CA3AF" fontSize={10} tickLine={false} axisLine={false} />
-                                <Tooltip
-                                  cursor={{ fill: "rgba(0,0,0,0.02)" }}
-                                  content={({ active, payload }) => {
-                                    if (active && payload && payload.length) {
-                                      const data = payload[0].payload;
-                                      return (
-                                        <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xl text-left max-w-sm">
-                                          <p className="font-bold text-gray-900 text-sm mb-1">{data.worker}</p>
-                                          <p className="text-xs text-indigo-600 font-semibold mb-2">
-                                            Công đoạn: {data.operation}
-                                            {data.operation2 ? ` + ${data.operation2}` : ""}
-                                          </p>
-                                          <div className="border-t border-gray-100 pt-2 flex justify-between items-center text-xs">
-                                            <span className="text-gray-500 font-medium">{payload[0].name}:</span>
-                                            <span className={`font-bold ${tsChartMetric === "productivity" ? "text-emerald-600" : "text-amber-600"}`}>
-                                              {payload[0].value} {tsChartMetric === "productivity" ? "sp/h" : "s"}
-                                            </span>
-                                          </div>
-                                        </div>
-                                      );
-                                    }
-                                    return null;
-                                  }}
-                                />
-                                <Bar
-                                  dataKey={
-                                    tsChartMetric === "productivity"
-                                      ? "Năng suất (SP/Giờ)"
-                                      : "Thời gian (Giây)"
-                                  }
-                                  radius={[6, 6, 0, 0]}
-                                  barSize={Math.max(12, Math.min(48, 480 / (chartData.length || 1)))}
+                          <div className="h-[320px] w-full overflow-x-auto overflow-y-hidden select-none scrollbar-thin scrollbar-thumb-gray-200">
+                            <div style={{ minWidth: `${Math.max(485, chartData.length * 75)}px`, width: "100%" }} className="h-full">
+                              <ResponsiveContainer width="100%" height="100%">
+                                <BarChart
+                                  data={chartData}
+                                  margin={{ top: 25, right: 10, left: -20, bottom: 35 }}
                                 >
-                                  {chartData.map((entry, index) => {
-                                    const opIndex = uniqueOperations.indexOf(entry.operation);
-                                    const color = opColors[opIndex % opColors.length] || "#9CA3AF";
-                                    return (
-                                      <Cell
-                                        key={`cell-${index}`}
-                                        fill={color}
-                                      />
-                                    );
-                                  })}
-                                  <LabelList
-                                    dataKey={
-                                      tsChartMetric === "productivity"
-                                        ? "Năng suất (SP/Giờ)"
-                                        : "Thời gian (Giây)"
-                                    }
-                                    position="top"
-                                    formatter={(val: number) => {
-                                      return tsChartMetric === "productivity" ? `${val} sp/h` : `${val}s`;
-                                    }}
-                                    style={{
-                                      fontSize: 10,
-                                      fontWeight: 700,
-                                      fill: "#374151",
+                                  <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f3f4f6" />
+                                  <XAxis
+                                    dataKey="worker"
+                                    stroke="#9CA3AF"
+                                    tick={<CustomChartTick />}
+                                    tickLine={false}
+                                    axisLine={false}
+                                    interval={0}
+                                  />
+                                  <YAxis stroke="#9CA3AF" fontSize={10} tickLine={false} axisLine={false} />
+                                  <Tooltip
+                                    cursor={{ fill: "rgba(0,0,0,0.02)" }}
+                                    content={({ active, payload }) => {
+                                      if (active && payload && payload.length) {
+                                        const data = payload[0].payload;
+                                        return (
+                                          <div className="bg-white p-4 rounded-2xl border border-gray-100 shadow-xl text-left max-w-sm">
+                                            <p className="font-bold text-gray-900 text-sm mb-1">{data.worker}</p>
+                                            <p className="text-xs text-indigo-600 font-semibold mb-2">
+                                              Công đoạn: {data.operation}
+                                              {data.operation2 ? ` + ${data.operation2}` : ""}
+                                            </p>
+                                            <div className="border-t border-gray-100 pt-2 flex justify-between items-center text-xs">
+                                              <span className="text-gray-500 font-medium">{payload[0].name}:</span>
+                                              <span className={`font-bold ${tsChartMetric === "productivity" ? "text-emerald-600" : "text-amber-600"}`}>
+                                                {payload[0].value} {tsChartMetric === "productivity" ? "Pcs/Giờ" : "s"}
+                                              </span>
+                                            </div>
+                                          </div>
+                                        );
+                                      }
+                                      return null;
                                     }}
                                   />
-                                </Bar>
-                              </BarChart>
-                            </ResponsiveContainer>
+                                  <Bar
+                                    dataKey={
+                                      tsChartMetric === "productivity"
+                                        ? "Năng suất (Pcs/Giờ)"
+                                        : "Thời gian (Giây)"
+                                    }
+                                    radius={[6, 6, 0, 0]}
+                                    barSize={Math.max(20, Math.min(48, 600 / (chartData.length || 1)))}
+                                  >
+                                    {chartData.map((entry, index) => {
+                                      const opIndex = uniqueOperations.indexOf(entry.operation);
+                                      const color = opColors[opIndex % opColors.length] || "#9CA3AF";
+                                      return (
+                                        <Cell
+                                          key={`cell-${index}`}
+                                          fill={color}
+                                        />
+                                      );
+                                    })}
+                                    <LabelList
+                                      dataKey={
+                                        tsChartMetric === "productivity"
+                                          ? "Năng suất (Pcs/Giờ)"
+                                          : "Thời gian (Giây)"
+                                      }
+                                      position="top"
+                                      formatter={(val: number) => {
+                                        return tsChartMetric === "productivity" ? `${val} Pcs/Giờ` : `${val}s`;
+                                      }}
+                                      style={{
+                                        fontSize: 9,
+                                        fontWeight: 700,
+                                        fill: "#374151",
+                                      }}
+                                    />
+                                  </Bar>
+                                </BarChart>
+                              </ResponsiveContainer>
+                            </div>
                           </div>
 
                           {/* Dynamic Color Legend for Operations */}
@@ -3909,11 +4289,11 @@ export default function App() {
                               }}
                               className={`${
                                 record.needsCheck
-                                  ? "bg-amber-50/70 border-amber-300 shadow-sm shadow-amber-400/5 animate-[pulse_4s_infinite]"
-                                  : "bg-gray-50/50 border-gray-100 hover:border-gray-200"
-                              } p-6 rounded-2xl border transition-all flex flex-col md:flex-row md:items-center justify-between gap-4 group select-none ${
+                                  ? "bg-amber-50/80 border-amber-305 shadow-sm shadow-amber-400/5 animate-[pulse_4s_infinite]"
+                                  : "bg-white border-gray-200/90 shadow-sm hover:border-gray-300 hover:shadow-md"
+                              } p-5 sm:p-6 rounded-2xl border transition-all flex flex-col xl:flex-row xl:items-center justify-between gap-5 group select-none ${
                                 tsSortOrder === "custom"
-                                  ? "cursor-grab active:cursor-grabbing hover:border-indigo-200"
+                                  ? "cursor-grab active:cursor-grabbing hover:border-indigo-300"
                                   : "cursor-default"
                               } ${
                                 draggedIndex === index
@@ -3923,8 +4303,8 @@ export default function App() {
                                     : ""
                               } ${draggedIndex !== null ? "*:pointer-events-none" : ""}`}
                             >
-                              <div className="flex flex-col sm:flex-row sm:items-center gap-6 flex-1">
-                                <div className="flex items-center gap-4">
+                              <div className="flex flex-col sm:flex-row sm:items-center gap-5 flex-1">
+                                <div className="flex items-center gap-3">
                                   {tsSortOrder === "custom" ? (
                                     <div className="text-gray-300 group-hover:text-indigo-400 transition-colors cursor-grab active:cursor-grabbing p-1">
                                       <GripVertical size={16} />
@@ -3934,54 +4314,64 @@ export default function App() {
                                       <GripVertical size={16} />
                                     </div>
                                   )}
-                                  <div className={`flex flex-col items-center justify-center p-3 rounded-xl border shadow-sm w-20 flex-shrink-0 transition-colors ${
+                                  <div className={`flex flex-col items-center justify-center p-3.5 rounded-2xl border shadow-sm w-20 h-20 flex-shrink-0 transition-colors ${
                                     record.needsCheck
                                       ? "bg-amber-500 border-amber-400 text-slate-900"
-                                      : "bg-white border-gray-100 text-indigo-600"
+                                      : "bg-slate-50 border-gray-100 text-indigo-700"
                                   }`}>
-                                    <p className={`text-lg font-black font-mono ${record.needsCheck ? "text-slate-900" : "text-indigo-600"}`}>
+                                    <p className={`text-lg font-black font-mono leading-none ${record.needsCheck ? "text-slate-900" : "text-indigo-700"}`}>
                                       {record.averageTime}s
                                     </p>
-                                    <p className={`text-[8px] uppercase font-bold ${record.needsCheck ? "text-slate-800" : "text-gray-400"}`}>
+                                    <p className={`text-[8px] uppercase font-bold tracking-wider mt-1.5 ${record.needsCheck ? "text-slate-800" : "text-gray-400"}`}>
                                       Avg Time
                                     </p>
                                   </div>
                                 </div>
                                 
-                                <div className="space-y-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <span className="bg-indigo-600 text-white text-[9px] font-bold px-1.5 py-0.5 rounded uppercase">
-                                      {worker?.line}
+                                <div className="space-y-1.5 flex-1">
+                                  <div className="flex flex-wrap items-center gap-1.5">
+                                    <span className="bg-indigo-50 border border-indigo-150 text-indigo-700 text-[10px] font-bold px-2 py-0.5 rounded-md uppercase tracking-wide">
+                                      Chuyền {worker?.line}
                                     </span>
-                                    <p className="text-sm font-bold text-gray-900">
-                                      {op?.name}{op2 ? ` + ${op2.name}` : ""} • {worker?.name}
-                                    </p>
                                     {record.needsCheck && (
-                                      <span className="bg-amber-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded-full flex items-center gap-1 uppercase tracking-wide animate-pulse">
+                                      <span className="bg-amber-100 border border-amber-250 text-amber-800 text-[10px] font-black px-2 py-0.5 rounded-md flex items-center gap-1 uppercase tracking-wide animate-pulse">
                                         <AlertTriangle size={10} /> Cần kiểm tra lại / Đo lại
                                       </span>
                                     )}
                                   </div>
-                                  <p className="text-[10px] text-gray-400 font-semibold">
-                                    {styleName} • {record.date}
+
+                                  <div className="space-y-1">
+                                    <h4 className="text-base sm:text-lg font-extrabold text-gray-900 leading-tight">
+                                      {op?.name}{op2 ? ` + ${op2.name}` : ""}
+                                    </h4>
+                                    <p className="text-sm sm:text-base font-bold text-indigo-650 flex items-center gap-1.5">
+                                      <span className="text-gray-450 font-medium text-xs sm:text-sm">Công nhân:</span>
+                                      <span className="underline decoration-indigo-300 decoration-2 underline-offset-2">{worker?.name || "Chưa rõ"}</span>
+                                    </p>
+                                  </div>
+
+                                  <p className="text-[11px] text-gray-400 font-semibold flex items-center gap-1.5 flex-wrap pt-0.5">
+                                    <span>Mã hàng: <strong className="text-gray-700">{styleName}</strong></span>
+                                    <span className="text-gray-200">|</span>
+                                    <span>Ngày đo: {record.date}</span>
                                   </p>
                                   
                                   {/* Sub-times detailed list */}
-                                  <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                                    <span className="text-[9px] text-gray-400 font-bold uppercase tracking-wider">Các lần đo:</span>
+                                  <div className="flex items-center gap-1.5 mt-2 flex-wrap pt-1 border-t border-dashed border-gray-100">
+                                    <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider">Các lần đo:</span>
                                     {record.times?.map((t, idx) => {
                                       const isSubChecked = record.needsCheckTimes?.[idx];
                                       return (
                                         <span
                                           key={idx}
-                                          className={`text-[10px] px-2 py-0.5 rounded font-mono font-bold transition-all ${
+                                          className={`text-[10.5px] px-2.5 py-0.5 rounded-lg font-mono font-bold transition-all ${
                                             isSubChecked
-                                              ? "bg-amber-100 text-amber-800 border border-amber-400 shadow-sm shadow-amber-500/15"
-                                              : "bg-white border border-gray-200 text-gray-600"
+                                              ? "bg-amber-100 text-amber-800 border border-amber-300 shadow-sm"
+                                              : "bg-gray-50 border border-gray-150 text-gray-600 hover:bg-gray-100"
                                           }`}
                                           title={isSubChecked ? "Lần đo này được đánh dấu cần check lại" : `Lần đo ${idx + 1}`}
                                         >
-                                          L{idx + 1}: <span className={isSubChecked ? "text-amber-900 font-extraboldUnderline" : "text-gray-800"}>{t}s</span>
+                                          L{idx + 1}: <span className={isSubChecked ? "text-amber-900 font-black" : "text-gray-800"}>{t}s</span>
                                           {isSubChecked && " ⚠️"}
                                         </span>
                                       );
@@ -3990,32 +4380,37 @@ export default function App() {
                                 </div>
                               </div>
                               
-                              <div className="flex items-center justify-between sm:justify-end gap-6 border-t md:border-t-0 pt-4 md:pt-0 border-gray-100">
-                                <div className="text-right">
-                                  <p className="text-xs font-bold text-gray-900">
-                                    {record.targetPerHour} sp/h
-                                  </p>
-                                  <p className="text-[10px] text-gray-400 uppercase font-bold">
-                                    Năng suất/Giờ
-                                  </p>
-                                </div>
-                                <div className="text-right border-l border-gray-200 pl-6 h-8 flex flex-col justify-center">
-                                  <p className="text-xs font-bold text-emerald-600">
-                                    {record.targetPerDay} sp/d
-                                  </p>
-                                  <p className="text-[10px] text-gray-400 uppercase font-bold">
-                                    Năng suất/Ngày
-                                  </p>
+                              <div className="flex flex-wrap items-center justify-between xl:justify-end gap-5 border-t xl:border-t-0 pt-4 xl:pt-0 border-gray-100">
+                                <div className="flex items-center gap-4">
+                                  {/* Pcs/Giờ Stats Chip */}
+                                  <div className="bg-gradient-to-br from-indigo-50/60 to-indigo-50 border border-indigo-110 p-3 rounded-2xl min-w-[105px] text-center shadow-sm">
+                                    <p className="text-2xl font-black font-mono text-indigo-605 leading-none">
+                                      {record.targetPerHour}
+                                    </p>
+                                    <p className="text-[10px] text-indigo-800/80 uppercase font-black tracking-wide mt-1.5">
+                                      Pcs/Giờ
+                                    </p>
+                                  </div>
+
+                                  {/* Pcs/Ngày Stats Chip */}
+                                  <div className="bg-gradient-to-br from-emerald-50/60 to-emerald-50 border border-emerald-100 p-3 rounded-2xl min-w-[105px] text-center shadow-sm">
+                                    <p className="text-2xl font-black font-mono text-emerald-600 leading-none">
+                                      {record.targetPerDay}
+                                    </p>
+                                    <p className="text-[10px] text-emerald-800/80 uppercase font-black tracking-wide mt-1.5">
+                                      Pcs/Ngày
+                                    </p>
+                                  </div>
                                 </div>
                                 
-                                <div className="flex items-center gap-1.5 ml-2 border-l border-gray-200 pl-6">
+                                <div className="flex items-center gap-1.5 ml-auto sm:ml-2 border-l border-gray-100 pl-4">
                                   <button
                                     type="button"
                                     onClick={() => handleToggleTimeStudyCheck(record.id, !!record.needsCheck)}
-                                    className={`flex items-center gap-1.5 px-3 py-2 rounded-xl border text-[10px] font-extrabold uppercase transition-all active:scale-95 cursor-pointer whitespace-nowrap ${
+                                    className={`flex items-center gap-1.5 px-3 py-2.5 rounded-xl border text-[10px] font-extrabold uppercase transition-all active:scale-95 cursor-pointer whitespace-nowrap ${
                                       record.needsCheck
-                                        ? "bg-amber-500 hover:bg-amber-400 text-slate-900 border-amber-400 shadow-md shadow-amber-500/10"
-                                        : "bg-white hover:bg-gray-100 text-gray-500 hover:text-amber-600 border-gray-200"
+                                        ? "bg-amber-500 hover:bg-amber-400 text-slate-900 border-amber-400 shadow-md"
+                                        : "bg-white hover:bg-gray-50 text-gray-500 hover:text-amber-600 border-gray-200"
                                     }`}
                                     title="Đánh dấu cần đo lại / bấm thời gian lại"
                                   >
@@ -4048,6 +4443,26 @@ export default function App() {
                 </div>
               </motion.div>
             )}
+
+            {activeTab === "utilities" && (
+              <motion.div
+                key="utilities"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <UtilitiesTab
+                  workers={workers}
+                  operations={operations}
+                  orders={orders}
+                  logs={logs}
+                  timeStudyRecords={timeStudyRecords}
+                  lines={lines}
+                  onImportWorkers={handleImportWorkers}
+                  onImportOperations={handleImportOperations}
+                />
+              </motion.div>
+            )}
           </AnimatePresence>
         </div>
       </main>
@@ -4069,7 +4484,7 @@ export default function App() {
             >
               <item.icon size={20} />
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-tighter">
+            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-normal sm:tracking-wide">
               {item.label}
             </span>
             {activeTab === item.id && (

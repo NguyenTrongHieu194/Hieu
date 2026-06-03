@@ -98,6 +98,10 @@ service cloud.firestore {
 
       // Subcollections
       
+      match /config/{configId} {
+        allow read, write: if isOwner(userId);
+      }
+
       match /lines/{lineId} {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(lineId) && isValidGarmentLine(incoming(), userId);
