@@ -53,3 +53,15 @@ export interface TimeStudyRecord {
   needsCheck?: boolean;
   needsCheckTimes?: boolean[]; // Marks which sub-times [first, second, third] need checks
 }
+
+export interface PlanFeedItem {
+  id: string;
+  title: string;
+  description?: string;
+  imageUrl?: string; // base64 representation of uploaded image/file
+  fileName?: string;
+  fileType?: string;
+  fileSize?: string;
+  createdAt: string; // ISO date string or formatted date
+}
+

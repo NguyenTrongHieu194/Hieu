@@ -89,6 +89,13 @@ service cloud.firestore {
              data.times is list && data.times.size() <= 100;
     }
 
+    function isValidPlanRecord(data, userId) {
+      return data.keys().hasAll(['title', 'userId']) &&
+             data.keys().size() <= 12 &&
+             data.userId == userId &&
+             data.title is string && data.title.size() > 0 && data.title.size() <= 300;
+    }
+
     // --- Collection Matches ---
 
     match /users/{userId} {
@@ -141,6 +148,13 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(studyId) && isValidTimeStudyRecord(incoming(), userId);
         allow update: if isOwner(userId) && isValidTimeStudyRecord(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /plans/{planId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(planId) && isValidPlanRecord(incoming(), userId);
+        allow update: if isOwner(userId) && isValidPlanRecord(incoming(), userId);
         allow delete: if isOwner(userId);
       }
     }

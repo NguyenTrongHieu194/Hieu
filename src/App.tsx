@@ -52,6 +52,7 @@ import {
   ProductionOrder,
   ProductionLog,
   TimeStudyRecord,
+  PlanFeedItem,
 } from "./types";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -364,6 +365,35 @@ const StopwatchTerminal = ({ onLap, timeStudy }: StopwatchTerminalProps) => {
   );
 };
 
+const safeFormatDate = (dateVal: any, formatStr: string = "HH:mm dd/MM/yyyy"): string => {
+  if (!dateVal) return "-";
+  try {
+    let d: Date;
+    // Handle Firestore Timestamp { seconds, nanoseconds }
+    if (typeof dateVal === "object" && dateVal !== null) {
+      if (typeof dateVal.toDate === "function") {
+        d = dateVal.toDate();
+      } else if (typeof dateVal.seconds === "number") {
+        d = new Date(dateVal.seconds * 1000);
+      } else {
+        d = new Date(dateVal);
+      }
+    } else {
+      d = new Date(dateVal);
+    }
+
+    if (isNaN(d.getTime())) {
+      if (typeof dateVal === "string") {
+        return dateVal;
+      }
+      return "-";
+    }
+    return format(d, formatStr);
+  } catch (error) {
+    return typeof dateVal === "string" ? dateVal : "-";
+  }
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState<Tab>("dashboard");
   const [user, setUser] = useState<FirebaseUser | null>(null);
@@ -409,6 +439,7 @@ export default function App() {
   const [timeStudyRecords, setTimeStudyRecords] = useState<TimeStudyRecord[]>(
     [],
   );
+  const [plans, setPlans] = useState<PlanFeedItem[]>([]);
 
   // Auth Effect
   useEffect(() => {
@@ -455,6 +486,7 @@ export default function App() {
       setOrders([]);
       setLogs([]);
       setTimeStudyRecords([]);
+      setPlans([]);
       return;
     }
 
@@ -476,6 +508,20 @@ export default function App() {
 
       const storedTS = localStorage.getItem('garmentops_demo_timeStudies');
       setTimeStudyRecords(storedTS ? JSON.parse(storedTS) : []);
+
+      const storedPlans = localStorage.getItem('garmentops_demo_plans');
+      setPlans(storedPlans ? JSON.parse(storedPlans) : [
+        {
+          id: "default-plan-1",
+          title: "Kế hoạch sản xuất tuần này",
+          description: "Bấm nút Thêm Kế Hoạch bên dưới để tải ảnh hoặc tệp sơ đồ chuyền mới.",
+          imageUrl: "https://images.unsplash.com/photo-1581091226825-a6a2a5aee158?auto=format&fit=crop&q=80&w=600",
+          fileName: "ke_hoach_tuan.jpg",
+          fileType: "image/jpeg",
+          fileSize: "120 KB",
+          createdAt: "2026-06-03T08:00:00.000Z"
+        }
+      ]);
 
       return;
     }
@@ -554,6 +600,22 @@ export default function App() {
         ),
     );
 
+    const unsubPlans = onSnapshot(
+      collection(db, `${userPath}/plans`),
+      (snap) => {
+        const data = snap.docs.map((d) => ({ id: d.id, ...d.data() }) as PlanFeedItem);
+        // Sort newest first based on createdAt ISO string
+        data.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+        setPlans(data);
+      },
+      (err) =>
+        handleFirestoreError(
+          err,
+          OperationType.LIST,
+          `${userPath}/plans`,
+        ),
+    );
+
     return () => {
       unsubLines();
       unsubWorkers();
@@ -561,6 +623,7 @@ export default function App() {
       unsubOrders();
       unsubLogs();
       unsubTS();
+      unsubPlans();
     };
   }, [user]);
 
@@ -596,6 +659,10 @@ export default function App() {
         const next = [...timeStudyRecords, newItem];
         setTimeStudyRecords(next);
         localStorage.setItem('garmentops_demo_timeStudies', JSON.stringify(next));
+      } else if (col === 'plans') {
+        const next = [newItem, ...plans];
+        setPlans(next);
+        localStorage.setItem('garmentops_demo_plans', JSON.stringify(next));
       }
       return;
     }
@@ -635,6 +702,10 @@ export default function App() {
         const next = timeStudyRecords.filter(t => t.id !== id);
         setTimeStudyRecords(next);
         localStorage.setItem('garmentops_demo_timeStudies', JSON.stringify(next));
+      } else if (col === 'plans') {
+        const next = plans.filter(p => p.id !== id);
+        setPlans(next);
+        localStorage.setItem('garmentops_demo_plans', JSON.stringify(next));
       }
       return;
     }
@@ -695,6 +766,18 @@ export default function App() {
   const [tsSortOrder, setTsSortOrder] = useState<"custom" | "newest">("custom");
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
+
+  // Plan Feed States
+  const [newPlanTitle, setNewPlanTitle] = useState("");
+  const [newPlanDesc, setNewPlanDesc] = useState("");
+  const [newPlanFile, setNewPlanFile] = useState<{
+    base64: string;
+    name: string;
+    type: string;
+    sizeFriendly: string;
+  } | null>(null);
+  const [isAddingPlan, setIsAddingPlan] = useState(false);
+  const [activeZoomedPlan, setActiveZoomedPlan] = useState<string | null>(null);
 
   // Time Study State
   const [timeStudy, setTimeStudy] = useState({
@@ -889,6 +972,82 @@ export default function App() {
     };
     await addDocToFirestore("workers", worker);
     setNewWorker({ name: "", code: "", skills: "", line: "" });
+  };
+
+  const resizeAndCompressImage = (
+    base64Str: string,
+    maxW = 1000,
+    maxH = 1000,
+    quality = 0.7
+  ): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.src = base64Str;
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > height) {
+          if (width > maxW) {
+            height = Math.round((height * maxW) / width);
+            width = maxW;
+          }
+        } else {
+          if (height > maxH) {
+            width = Math.round((width * maxH) / height);
+            height = maxH;
+          }
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(base64Str);
+          return;
+        }
+
+        ctx.drawImage(img, 0, 0, width, height);
+        const compressedBase64 = canvas.toDataURL("image/jpeg", quality);
+        resolve(compressedBase64);
+      };
+      img.onerror = () => {
+        resolve(base64Str);
+      };
+    });
+  };
+
+  const handleAddPlan = async () => {
+    if (!user) return;
+    if (!newPlanTitle.trim()) {
+      alert("Vui lòng nhập tiêu đề kế hoạch!");
+      return;
+    }
+
+    const payload = {
+      title: newPlanTitle.trim(),
+      description: newPlanDesc.trim() || "",
+      imageUrl: newPlanFile?.base64 || "",
+      fileName: newPlanFile?.name || "",
+      fileType: newPlanFile?.type || "",
+      fileSize: newPlanFile?.sizeFriendly || "",
+      createdAt: new Date().toISOString()
+    };
+
+    await addDocToFirestore("plans", payload);
+    setNewPlanTitle("");
+    setNewPlanDesc("");
+    setNewPlanFile(null);
+    setIsAddingPlan(false);
+  };
+
+  const handleDeletePlan = async (id: string) => {
+    if (window.confirm && !window.confirm("Bạn có chắc chắn muốn xóa kế hoạch này?")) {
+      return;
+    }
+    await deleteDocFromFirestore("plans", id);
   };
 
   const handleDeleteWorker = async (id: string) => {
@@ -2220,46 +2379,170 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-gray-100 bg-white p-6 shadow-sm">
-                    <h3 className="mb-6 text-lg font-bold text-gray-900 italic font-serif">
-                      Phân bổ Công nhân
-                    </h3>
-                    <div className="space-y-4">
-                      {workers.slice(0, 5).map((worker, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center justify-between group cursor-pointer hover:bg-gray-50 p-2 rounded-lg transition-colors"
-                        >
-                          <div className="flex items-center gap-3">
-                            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-indigo-100 text-indigo-700 font-bold text-xs uppercase tracking-tighter">
-                              {worker.name.split(" ").pop()?.[0]}
-                            </div>
-                            <div>
-                              <p className="text-sm font-semibold text-gray-900">
-                                {worker.name}
-                              </p>
-                              <p className="text-xs text-gray-500">
-                                {worker.code}
-                              </p>
-                            </div>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-sm font-mono font-bold text-gray-900">
-                              {worker.performance}%
-                            </p>
-                            <div className="mt-1 h-1 w-16 overflow-hidden rounded-full bg-gray-100">
-                              <div
-                                className={`h-full ${worker.performance > 90 ? "bg-emerald-500" : "bg-indigo-500"}`}
-                                style={{ width: `${worker.performance}%` }}
-                              ></div>
-                            </div>
-                          </div>
-                        </div>
-                      ))}
+                  <div className="rounded-2xl border border-gray-100 bg-white p-5 sm:p-6 shadow-sm flex flex-col h-[400px]">
+                    <div className="flex items-center justify-between mb-4 flex-shrink-0">
+                      <h3 className="text-base sm:text-lg font-bold text-gray-900 font-serif flex items-center gap-1.5">
+                        <Calendar size={18} className="text-indigo-600" />
+                        Bản Tin Kế Hoạch
+                      </h3>
+                      
+                      <button
+                        onClick={() => setIsAddingPlan(!isAddingPlan)}
+                        className="flex items-center gap-1 text-[11px] font-bold text-indigo-650 hover:text-indigo-850 transition-colors uppercase tracking-wider"
+                      >
+                        <Plus size={13} /> Thêm kế hoạch
+                      </button>
                     </div>
-                    <button className="mt-6 w-full rounded-xl bg-gray-50 py-3 text-sm font-medium text-gray-600 hover:bg-gray-100 transition-colors">
-                      Xem tất cả công nhân
-                    </button>
+
+                    {isAddingPlan ? (
+                      /* FORM FOR ADDING PLAN */
+                      <div className="space-y-3 p-3 bg-slate-50 rounded-xl border border-slate-100 mb-4 overflow-y-auto max-h-[300px] flex-shrink-0">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-bold uppercase text-slate-500">Tải kế hoạch mới</span>
+                          <button onClick={() => { setIsAddingPlan(false); setNewPlanFile(null); }} className="text-xs text-gray-400 hover:text-gray-600">Đóng</button>
+                        </div>
+                        <input
+                          type="text"
+                          placeholder="Tiêu đề (ví dụ: Kế hoạch tuần 23)..."
+                          value={newPlanTitle}
+                          onChange={(e) => setNewPlanTitle(e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-medium"
+                        />
+                        <textarea
+                          placeholder="Mô tả hoặc ghi chú..."
+                          rows={2}
+                          value={newPlanDesc}
+                          onChange={(e) => setNewPlanDesc(e.target.value)}
+                          className="w-full text-xs p-2.5 rounded-lg border border-gray-200 focus:ring-1 focus:ring-indigo-500 outline-none bg-white font-medium resize-none"
+                        />
+                        
+                        {/* File Selector */}
+                        <div className="relative">
+                          <input
+                            type="file"
+                            accept="image/*"
+                            id="plan-file-upload"
+                            className="hidden"
+                            onChange={(e) => {
+                              const file = e.target.files?.[0];
+                              if (!file) return;
+                              const reader = new FileReader();
+                              reader.onload = async (evt) => {
+                                const rawBase64 = evt.target?.result as string;
+                                // Compress image to handle the 1MB limit gracefully
+                                const compressedBase64 = await resizeAndCompressImage(rawBase64);
+                                const approxBytes = Math.round((compressedBase64.length * 3) / 4);
+                                const sizeFriendly = (approxBytes / 1024).toFixed(0) + " KB";
+                                
+                                setNewPlanFile({
+                                  base64: compressedBase64,
+                                  name: file.name,
+                                  type: "image/jpeg",
+                                  sizeFriendly: sizeFriendly
+                                });
+                              };
+                              reader.readAsDataURL(file);
+                            }}
+                          />
+                          {newPlanFile ? (
+                            <div className="flex items-center justify-between p-2 bg-indigo-50 border border-indigo-100 rounded-lg text-xs">
+                              <div className="flex items-center gap-2 truncate max-w-[80%]">
+                                <span className="text-indigo-600 font-bold truncate">{newPlanFile.name}</span>
+                                <span className="text-[9px] text-gray-400">({newPlanFile.sizeFriendly})</span>
+                              </div>
+                              <button onClick={() => setNewPlanFile(null)} className="text-rose-500 font-bold hover:text-rose-700">Xóa</button>
+                            </div>
+                          ) : (
+                            <label
+                              htmlFor="plan-file-upload"
+                              className="flex flex-col items-center justify-center p-3.5 border border-dashed border-gray-200 rounded-lg cursor-pointer bg-white hover:bg-indigo-50/25 hover:border-indigo-300 transition-colors"
+                            >
+                              <FileUp className="text-gray-400 mb-1" size={18} />
+                              <span className="text-[10px] font-bold text-gray-400 uppercase">Chọn hình ảnh sơ đồ kế hoạch</span>
+                            </label>
+                          )}
+                        </div>
+
+                        <button
+                          onClick={handleAddPlan}
+                          className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg text-xs font-bold transition-colors flex items-center justify-center gap-1 shadow-xs cursor-pointer"
+                        >
+                          <Plus size={14} /> Đăng kế hoạch
+                        </button>
+                      </div>
+                    ) : null}
+
+                    {/* TIMELINE FEED LIST */}
+                    <div className="flex-1 overflow-y-auto space-y-4 pr-1 scrollbar-thin">
+                      {plans.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center h-full text-center p-4">
+                          <Calendar size={32} className="text-gray-300 mb-2" />
+                          <p className="text-xs font-semibold text-gray-400">Chưa tải sơ đồ hay thông báo kế hoạch nào</p>
+                          <button
+                            onClick={() => setIsAddingPlan(true)}
+                            className="mt-2 text-[10px] font-black uppercase text-indigo-600 hover:underline"
+                          >
+                            + Tải ngay
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="relative border-l border-indigo-100 ml-2.5 pl-4 pb-1 space-y-5">
+                          {plans.map((plan) => {
+                            const formattedDate = safeFormatDate(plan.createdAt, "HH:mm dd/MM/yyyy");
+                            return (
+                              <div key={plan.id} className="relative group/item">
+                                {/* Timeline Dot */}
+                                <div className="absolute -left-[21px] top-1 h-2.5 w-2.5 rounded-full border border-white bg-indigo-500 shadow-sm transition-transform group-hover/item:scale-125 duration-150" />
+                                
+                                <div className="space-y-1">
+                                  {/* Date and actions */}
+                                  <div className="flex items-center justify-between">
+                                    <span className="text-[10px] font-bold text-gray-400 font-mono">
+                                      {formattedDate}
+                                    </span>
+                                    <button
+                                      onClick={() => handleDeletePlan(plan.id)}
+                                      className="opacity-0 group-hover/item:opacity-100 text-rose-500 hover:text-rose-700 transition-opacity p-0.5 cursor-pointer"
+                                      title="Xóa kế hoạch này"
+                                    >
+                                      <Trash2 size={12} />
+                                    </button>
+                                  </div>
+
+                                  <h4 className="text-xs font-bold text-gray-900 leading-tight">
+                                    {plan.title}
+                                  </h4>
+
+                                  {plan.description && (
+                                    <p className="text-[11px] text-gray-500 font-medium whitespace-pre-wrap leading-relaxed max-w-full">
+                                      {plan.description}
+                                    </p>
+                                  )}
+
+                                  {plan.imageUrl && (
+                                    <div className="mt-2 relative rounded-xl overflow-hidden border border-gray-150 shadow-xs cursor-zoom-in bg-gray-50 group-hover/item:border-indigo-200 transition-colors">
+                                      <img
+                                        src={plan.imageUrl}
+                                        alt={plan.title}
+                                        referrerPolicy="no-referrer"
+                                        className="w-full max-h-[140px] object-cover hover:scale-[1.03] transition-transform duration-200"
+                                        onClick={() => setActiveZoomedPlan(plan.imageUrl || null)}
+                                      />
+                                      {plan.fileName && (
+                                        <div className="absolute bottom-0 left-0 right-0 bg-black/55 backdrop-blur-[1px] px-2 py-1 flex items-center justify-between text-[9px] text-white">
+                                          <span className="truncate max-w-[80%]">{plan.fileName}</span>
+                                          <span className="text-gray-300">({plan.fileSize || "Ảnh Sơ Đồ"})</span>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
                   </div>
                 </div>
               </motion.div>
@@ -2813,7 +3096,7 @@ export default function App() {
                           .reverse()
                           .map((d: string) => (
                             <option key={d} value={d}>
-                              {format(new Date(d), "dd/MM/yyyy")}
+                              {safeFormatDate(d, "dd/MM/yyyy")}
                             </option>
                           ))}
                       </select>
@@ -2887,10 +3170,7 @@ export default function App() {
                               >
                                 <td className="py-5 px-2">
                                   <p className="text-xs font-black text-gray-700">
-                                    {format(
-                                      new Date(summary.date),
-                                      "dd/MM/yyyy",
-                                    )}
+                                    {safeFormatDate(summary.date, "dd/MM/yyyy")}
                                   </p>
                                 </td>
                                 <td className="py-5 px-2">
@@ -4496,6 +4776,42 @@ export default function App() {
           </button>
         ))}
       </nav>
+
+      {/* Plan Image Zoom Modal Overlay */}
+      <AnimatePresence>
+        {activeZoomedPlan && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            onClick={() => setActiveZoomedPlan(null)}
+            className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/80 backdrop-blur-md cursor-zoom-out"
+          >
+            <motion.div
+              initial={{ scale: 0.95, y: 20 }}
+              animate={{ scale: 1, y: 0 }}
+              exit={{ scale: 0.95, y: 20 }}
+              className="relative max-w-4xl w-full max-h-[90vh] bg-white rounded-2xl overflow-hidden shadow-2xl p-2"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                onClick={() => setActiveZoomedPlan(null)}
+                className="absolute top-4 right-4 bg-gray-900/80 hover:bg-gray-900 text-white h-8 w-8 rounded-full flex items-center justify-center transition-colors cursor-pointer shadow-md z-10"
+              >
+                <X size={18} />
+              </button>
+              <div className="w-full h-full flex items-center justify-center overflow-auto max-h-[85vh]">
+                <img
+                  src={activeZoomedPlan}
+                  alt="Bảng kế hoạch"
+                  referrerPolicy="no-referrer"
+                  className="max-w-full max-h-[80vh] object-contain rounded-lg select-none"
+                />
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

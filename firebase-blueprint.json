@@ -102,6 +102,22 @@
       },
       "required": ["date", "workerId", "operationId", "style", "times", "userId"]
     },
+    "PlanFeedItem": {
+      "title": "Plan Feed Item",
+      "description": "An uploaded production plan or timeline post with optional graphic layout",
+      "type": "object",
+      "properties": {
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "imageUrl": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileType": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "userId": { "type": "string" }
+      },
+      "required": ["title", "userId"]
+    },
     "WorkspaceConfig": {
       "title": "Workspace Configuration",
       "description": "Integration configuration including tokens",
@@ -145,6 +161,10 @@
     "users/{userId}/timeStudies": {
       "schema": "TimeStudyRecord",
       "description": "User's time study database"
+    },
+    "users/{userId}/plans": {
+      "schema": "PlanFeedItem",
+      "description": "User's uploaded production plans and visual charts"
     }
   }
 }
