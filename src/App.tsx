@@ -42,6 +42,9 @@ import {
   CalendarRange,
   ArrowLeftRight,
   ShieldAlert,
+  Clipboard,
+  FileSpreadsheet,
+  Printer,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import UtilitiesTab from "./components/UtilitiesTab";
@@ -71,7 +74,7 @@ import {
   PlanFeedItem,
   QualityLog,
 } from "./types";
-import { format } from "date-fns";
+import { format, subDays, subMonths, addDays, addMonths, parseISO } from "date-fns";
 import * as XLSX from "xlsx";
 import {
   BarChart,
@@ -1088,6 +1091,12 @@ export default function App() {
   // Dashboard States
   const [dashboardDate, setDashboardDate] = useState(format(new Date(), "yyyy-MM-dd"));
   const [dashboardPeriod, setDashboardPeriod] = useState<"day" | "week" | "month">("day");
+
+  // System Activity Report States
+  const [isOpenSystemReportModal, setIsOpenSystemReportModal] = useState(false);
+  const [sysReportPeriod, setSysReportPeriod] = useState<"day" | "week" | "month">("month");
+  const [sysReportDate, setSysReportDate] = useState(format(new Date(), "yyyy-MM-dd"));
+  const [sysCopiedSuccess, setSysCopiedSuccess] = useState(false);
 
   // Time Study State
   const [timeStudy, setTimeStudy] = useState({
@@ -2888,6 +2897,17 @@ export default function App() {
                           Tháng
                         </button>
                       </div>
+
+                      <button
+                        onClick={() => {
+                          setSysReportPeriod(dashboardPeriod);
+                          setSysReportDate(dashboardDate);
+                          setIsOpenSystemReportModal(true);
+                        }}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-black text-xs px-4 py-2.5 rounded-xl flex items-center gap-1.5 transition-all cursor-pointer shadow-md shadow-emerald-100 border-0"
+                      >
+                        <FileText size={14} /> Xuất Báo Cáo Tổng Hợp
+                      </button>
                     </div>
                   </div>
 
@@ -8579,6 +8599,779 @@ export default function App() {
             </motion.div>
           </motion.div>
         )}
+      </AnimatePresence>
+
+      {/* COMPREHENSIVE SYSTEM-WIDE REPORT MODAL */}
+      <AnimatePresence>
+        {isOpenSystemReportModal && (() => {
+          // 1. Date configurations inside report
+          const sysYearMonth = sysReportDate.substring(0, 7);
+          const getSysWeekDatesList = (baseDateStr: string) => {
+            const list: string[] = [];
+            const parts = baseDateStr.split("-").map(Number);
+            const baseDate = new Date(parts[0], parts[1] - 1, parts[2]);
+            for (let i = 6; i >= 0; i--) {
+              const d = new Date(baseDate);
+              d.setDate(baseDate.getDate() - i);
+              const y = d.getFullYear();
+              const m = String(d.getMonth() + 1).padStart(2, "0");
+              const r = String(d.getDate()).padStart(2, "0");
+              list.push(`${y}-${m}-${r}`);
+            }
+            return list;
+          };
+
+          const sysDatesList = sysReportPeriod === "day"
+            ? [sysReportDate]
+            : sysReportPeriod === "week"
+              ? getSysWeekDatesList(sysReportDate)
+              : [];
+
+          const isSysDateInPeriod = (dateStr: string) => {
+            if (sysReportPeriod === "day") {
+              return dateStr === sysReportDate;
+            } else if (sysReportPeriod === "week") {
+              return sysDatesList.includes(dateStr);
+            } else {
+              return dateStr.startsWith(sysYearMonth);
+            }
+          };
+
+          // 2. Chấm công (Attendance Stats)
+          let sysPresentAvg = 0;
+          let sysAbsentTotal = 0;
+          let sysLateTotal = 0;
+          const sysAbsentsList: Array<{ name: string; line: string; date: string; reason: string }> = [];
+          const sysLatesList: Array<{ name: string; line: string; date: string; time: string; reason: string }> = [];
+
+          const getSysAttendanceStats = (dStr: string) => {
+            const recs = attendance.filter(a => a.date === dStr);
+            let pCount = workers.length;
+            let aCount = 0;
+            let lCount = 0;
+            const aList: any[] = [];
+            const lList: any[] = [];
+
+            workers.forEach(w => {
+              const rec = recs.find(r => r.workerId === w.id);
+              if (rec) {
+                if (rec.status === "absent") {
+                  pCount--;
+                  aCount++;
+                  aList.push({ name: w.name, line: w.line, date: dStr, reason: rec.reason || rec.leaveType || "Không lý do" });
+                } else if (rec.status === "late") {
+                  lCount++;
+                  lList.push({ name: w.name, line: w.line, date: dStr, time: rec.timeValue, reason: rec.reason || "Không lý do" });
+                }
+              }
+            });
+            return { pCount, aCount, lCount, aList, lList };
+          };
+
+          if (sysReportPeriod === "day") {
+            const stats = getSysAttendanceStats(sysReportDate);
+            sysPresentAvg = stats.pCount;
+            sysAbsentTotal = stats.aCount;
+            sysLateTotal = stats.lCount;
+            sysAbsentsList.push(...stats.aList);
+            sysLatesList.push(...stats.lList);
+          } else {
+            const periodDates = Array.from(new Set(attendance.map(a => a.date).filter(isSysDateInPeriod)));
+            if (periodDates.length === 0) {
+              sysPresentAvg = workers.length;
+              sysAbsentTotal = 0;
+              sysLateTotal = 0;
+            } else {
+              let sumP = 0;
+              periodDates.forEach(d => {
+                const stats = getSysAttendanceStats(d as string);
+                sumP += stats.pCount;
+                sysAbsentTotal += stats.aCount;
+                sysLateTotal += stats.lCount;
+                sysAbsentsList.push(...stats.aList);
+                sysLatesList.push(...stats.lList);
+              });
+              sysPresentAvg = Math.round(sumP / periodDates.length);
+            }
+          }
+
+          // 3. Sản lượng thực tế (Production Stats)
+          const sysProdLogs = workerHourlyLogs.filter(log => isSysDateInPeriod(log.date));
+          const sysTotalQty = sysProdLogs.reduce((sum, log) => sum + (Number(log.actualQuantity) || 0), 0);
+
+          const sysLineBreakdown = lines.map(line => {
+            const lineLogs = sysProdLogs.filter(log => log.line === line);
+            const qty = lineLogs.reduce((sum, log) => sum + (Number(log.actualQuantity) || 0), 0);
+            return { line, qty };
+          }).sort((a, b) => b.qty - a.qty);
+
+          // 4. Kế hoạch & Đơn hàng (Planning & Orders)
+          const sysTotalOrderedQty = orders.reduce((sum, o) => sum + o.orderQuantity, 0);
+          const sysTotalProducedQty = orders.reduce((sum, o) => sum + o.producedQuantity, 0);
+          const sysOverallProgress = sysTotalOrderedQty > 0 ? (sysTotalProducedQty / sysTotalOrderedQty) * 100 : 0;
+
+          // 5. Kiểm lỗi & Chất lượng (Quality Stats)
+          const sysQualityLogs = qualityLogs.filter(log => isSysDateInPeriod(log.date));
+          const sysTotalChecked = sysQualityLogs.reduce((sum, log) => sum + (log.totalChecked || 0), 0);
+          const sysTotalDefects = sysQualityLogs.reduce((sum, log) => sum + (log.defectCount || 0), 0);
+          const sysDefectRate = sysTotalChecked > 0 ? (sysTotalDefects / sysTotalChecked) * 100 : 0;
+          const sysCriticalCount = sysQualityLogs.filter(log => log.severity === "critical").reduce((sum, log) => sum + log.defectCount, 0);
+
+          const sysDefectTypesMap: Record<string, number> = {};
+          sysQualityLogs.forEach(log => {
+            sysDefectTypesMap[log.defectType] = (sysDefectTypesMap[log.defectType] || 0) + log.defectCount;
+          });
+          const sysTopDefects = Object.entries(sysDefectTypesMap)
+            .map(([type, count]) => ({ type, count }))
+            .sort((a, b) => b.count - a.count);
+
+          // 6. Bấm giờ (Time Study)
+          const sysTimeRecords = timeStudyRecords.filter(rec => isSysDateInPeriod(rec.date));
+          const sysTimeCount = sysTimeRecords.length;
+          let sysAvgCycleTime = 0;
+          if (sysTimeCount > 0) {
+            const sumCycles = sysTimeRecords.reduce((sum, rec) => sum + (rec.cycleTime || 0), 0);
+            sysAvgCycleTime = sumCycles / sysTimeCount;
+          }
+
+          // 7. Cuộc họp & dọn dẹp
+          const sysMeetings = meetings.filter(m => isSysDateInPeriod(m.date));
+          const sysDuties = duties.filter(d => isSysDateInPeriod(d.date));
+          const sysDutiesCount = sysDuties.length;
+
+          // Period navigation inside Modal
+          const handlePrevSysPeriod = () => {
+            const current = parseISO(sysReportDate);
+            if (sysReportPeriod === "day") {
+              setSysReportDate(format(subDays(current, 1), "yyyy-MM-dd"));
+            } else if (sysReportPeriod === "week") {
+              setSysReportDate(format(subDays(current, 7), "yyyy-MM-dd"));
+            } else {
+              setSysReportDate(format(subMonths(current, 1), "yyyy-MM-dd"));
+            }
+          };
+
+          const handleNextSysPeriod = () => {
+            const current = parseISO(sysReportDate);
+            if (sysReportPeriod === "day") {
+              setSysReportDate(format(addDays(current, 1), "yyyy-MM-dd"));
+            } else if (sysReportPeriod === "week") {
+              setSysReportDate(format(addDays(current, 7), "yyyy-MM-dd"));
+            } else {
+              setSysReportDate(format(addMonths(current, 1), "yyyy-MM-dd"));
+            }
+          };
+
+          // Print report helper (identical structure, high readability)
+          const handlePrintSysReport = () => {
+            const printWindow = window.open("", "_blank");
+            if (!printWindow) {
+              alert("Vui lòng cho phép trình duyệt mở popup để in báo cáo!");
+              return;
+            }
+
+            let periodStr = "";
+            if (sysReportPeriod === "day") {
+              periodStr = `Ngày ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}`;
+            } else if (sysReportPeriod === "week") {
+              periodStr = `Tuần bắt đầu từ ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}`;
+            } else {
+              periodStr = `Tháng ${safeFormatDate(sysReportDate, "MM/yyyy")}`;
+            }
+
+            const lineRows = sysLineBreakdown.map(l => `
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Chuyền ${l.line}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; font-weight: bold; color: #059669;">${l.qty.toLocaleString()} pcs</td>
+              </tr>
+            `).join("");
+
+            const defectRows = sysTopDefects.map(d => `
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">Lỗi ${d.type}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; text-align: center; color: #dc2626; font-weight: bold;">${d.count} lần</td>
+              </tr>
+            `).join("");
+
+            const meetingRows = sysMeetings.map(m => `
+              <tr>
+                <td style="padding: 8px; border: 1px solid #ddd; white-space: nowrap;">${m.date}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${m.type === "company" ? "Công ty" : "Tổ"}</td>
+                <td style="padding: 8px; border: 1px solid #ddd;">${m.topic}</td>
+                <td style="padding: 8px; border: 1px solid #ddd; font-style: italic; color: #555;">${m.notes || "Không ghi chú"}</td>
+              </tr>
+            `).join("");
+
+            const attendanceRows = [
+              ...sysAbsentsList.map(a => `
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd; white-space: nowrap;">${a.date}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${a.name}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">Chuyền ${a.line}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; color: #dc2626; font-weight: bold;">Vắng mặt</td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">-</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; font-style: italic; color: #666;">${a.reason}</td>
+                </tr>
+              `),
+              ...sysLatesList.map(l => `
+                <tr>
+                  <td style="padding: 8px; border: 1px solid #ddd; white-space: nowrap;">${l.date}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${l.name}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd;">Chuyền ${l.line}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; color: #d97706; font-weight: bold;">Đi trễ</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; font-weight: bold;">${l.time}</td>
+                  <td style="padding: 8px; border: 1px solid #ddd; font-style: italic; color: #666;">${l.reason}</td>
+                </tr>
+              `)
+            ].join("");
+
+            printWindow.document.write(`
+              <html>
+                <head>
+                  <title>Báo cáo hoạt động tổng hợp ${periodStr}</title>
+                  <style>
+                    body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; color: #333; padding: 20px; line-height: 1.5; }
+                    h1 { text-align: center; color: #1e1b4b; margin-bottom: 5px; font-size: 1.6rem; }
+                    h2 { text-align: center; color: #4f46e5; margin-top: 0; font-size: 1.1rem; }
+                    h3 { border-bottom: 2px solid #059669; color: #1e1b4b; padding-bottom: 5px; margin-top: 25px; font-size: 1.2rem; }
+                    table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.85rem; }
+                    th { background-color: #f3f4f6; padding: 8px; border: 1px solid #ddd; font-weight: bold; text-align: left; }
+                    .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin: 20px 0; }
+                    .card { background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 12px; text-align: center; }
+                    .card .val { font-size: 1.3rem; font-weight: bold; color: #1e1b4b; margin-top: 4px; }
+                    .card .lbl { font-size: 0.7rem; text-transform: uppercase; color: #6b7280; font-weight: bold; }
+                    @media print {
+                      button { display: none; }
+                      body { padding: 0; }
+                    }
+                  </style>
+                </head>
+                <body>
+                  <div style="text-align: right;">
+                    <button onclick="window.print()" style="background-color: #059669; color: white; border: none; padding: 10px 20px; border-radius: 6px; font-weight: bold; cursor: pointer;">IN BÁO CÁO</button>
+                  </div>
+                  <h1>BÁO CÁO HOẠT ĐỘNG TOÀN DIỆN DOANH NGHIỆP</h1>
+                  <h2>Kỳ báo cáo: ${periodStr}</h2>
+                  
+                  <div class="grid">
+                    <div class="card">
+                      <div class="lbl">Sản lượng hoàn thành</div>
+                      <div class="val" style="color: #059669;">${sysTotalQty.toLocaleString()} pcs</div>
+                    </div>
+                    <div class="card">
+                      <div class="lbl">Tiến độ đơn hàng chung</div>
+                      <div class="val">${sysOverallProgress.toFixed(1)}%</div>
+                    </div>
+                    <div class="card">
+                      <div class="lbl">Tỷ lệ đi làm trung bình</div>
+                      <div class="val">${((sysPresentAvg / (workers.length || 1)) * 100).toFixed(0)}%</div>
+                    </div>
+                    <div class="card">
+                      <div class="lbl">Tổng lượt vắng / đi trễ</div>
+                      <div class="val" style="color: #dc2626;">${sysAbsentTotal} / ${sysLateTotal} lượt</div>
+                    </div>
+                    <div class="card">
+                      <div class="lbl">Tỷ lệ sai hỏng kiểm lỗi</div>
+                      <div class="val" style="color: ${sysDefectRate > 5 ? '#dc2626' : '#b45309'};">${sysDefectRate.toFixed(2)}%</div>
+                    </div>
+                    <div class="card">
+                      <div class="lbl">Số ca trực nhật / đo bấm giờ</div>
+                      <div class="val">${sysDutiesCount} ca / ${sysTimeCount} lượt</div>
+                    </div>
+                  </div>
+
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
+                    <div>
+                      <h3>1. SẢN LƯỢNG THEO CHUYỀN MAY</h3>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Chuyền</th>
+                            <th style="text-align: center;">Sản lượng</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${lineRows || '<tr><td colspan="2" style="text-align:center; padding: 10px; color: #888;">Không có dữ liệu</td></tr>'}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div>
+                      <h3>2. CƠ CẤU LỖI CHẤT LƯỢNG PHÁT SINH</h3>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Loại lỗi</th>
+                            <th style="text-align: center;">Số lượng</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          ${defectRows || '<tr><td colspan="2" style="text-align:center; padding: 10px; color: #888;">Không có dữ liệu</td></tr>'}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <h3>3. CHI TIẾT LỊCH HỌP GIAO BAN</h3>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Ngày</th>
+                        <th>Quy mô</th>
+                        <th>Chủ đề cuộc họp</th>
+                        <th>Nội dung / Chỉ đạo cốt lõi</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${meetingRows || '<tr><td colspan="4" style="text-align:center; padding: 10px; color: #888;">Không có dữ liệu cuộc họp</td></tr>'}
+                    </tbody>
+                  </table>
+
+                  <h3>4. CHI TIẾT NHÂN SỰ VẮNG MẶT / ĐI TRỄ TRONG KỲ</h3>
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Ngày</th>
+                        <th>Tên Công Nhân</th>
+                        <th>Tổ / Chuyền</th>
+                        <th>Trạng thái</th>
+                        <th>Thời gian trễ</th>
+                        <th>Lý do ghi nhận</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      ${attendanceRows || '<tr><td colspan="6" style="text-align:center; padding: 10px; color: #888;">Toàn bộ công nhân đi làm đầy đủ và đúng giờ</td></tr>'}
+                    </tbody>
+                  </table>
+
+                  <div style="margin-top: 40px; text-align: right; font-style: italic; color: #666; font-size: 0.8rem;">
+                    Báo cáo lập tự động bởi GarmentOps &bull; Ngày lập: ${new Date().toLocaleString('vi-VN')}
+                  </div>
+                  
+                  <script>
+                    window.onload = function() {
+                      setTimeout(function() {
+                        window.print();
+                      }, 500);
+                    }
+                  </script>
+                </body>
+              </html>
+            `);
+            printWindow.document.close();
+          };
+
+          const handleCopySysReport = () => {
+            let periodStr = "";
+            if (sysReportPeriod === "day") {
+              periodStr = `Ngày ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}`;
+            } else if (sysReportPeriod === "week") {
+              periodStr = `Tuần từ ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}`;
+            } else {
+              periodStr = `Tháng ${safeFormatDate(sysReportDate, "MM/yyyy")}`;
+            }
+
+            const title = `🌟 BÁO CÁO HOẠT ĐỘNG TOÀN DIỆN DOANH NGHIỆP DỆT MAY (${periodStr.toUpperCase()})\n`;
+            const separator = `=========================================\n`;
+            
+            const prod = `📊 1. SẢN XUẤT & ĐƠN HÀNG:\n` +
+              `- Tổng sản lượng may đạt được: ${sysTotalQty.toLocaleString()} pcs\n` +
+              `- Tiến độ hoàn thành đơn hàng tổng thể: ${sysOverallProgress.toFixed(1)}% (${sysTotalProducedQty.toLocaleString()} / ${sysTotalOrderedQty.toLocaleString()} pcs)\n` +
+              `- Số chuyền may hoạt động: ${lines.length}\n` +
+              sysLineBreakdown.slice(0, 3).map((l, i) => `  + Top ${i+1}. Chuyền ${l.line}: ${l.qty.toLocaleString()} pcs`).join("\n") + "\n\n";
+
+            const att = `👷 2. NHÂN SỰ & CHUYÊN CẦN:\n` +
+              `- Tỷ lệ đi làm trung bình: ${((sysPresentAvg / (workers.length || 1)) * 100).toFixed(1)}% (${sysPresentAvg}/${workers.length} người)\n` +
+              `- Tổng lượt vắng mặt trong kỳ: ${sysAbsentTotal} lượt\n` +
+              `- Tổng lượt đi muộn trong kỳ: ${sysLateTotal} lượt\n\n`;
+
+            const qual = `🛡️ 3. CHẤT LƯỢNG & SAI HỎNG:\n` +
+              `- Đã kiểm tra chất lượng: ${sysTotalChecked.toLocaleString()} mẫu\n` +
+              `- Phát hiện lỗi sai hỏng: ${sysTotalDefects.toLocaleString()} lỗi\n` +
+              `- Tỷ lệ lỗi trung bình: ${sysDefectRate.toFixed(2)}%\n` +
+              `- Số lỗi nghiêm trọng (Critical): ${sysCriticalCount.toLocaleString()} lỗi\n` +
+              (sysTopDefects.length > 0 ? `  + Lỗi phổ biến nhất: ${sysTopDefects[0].type} (${sysTopDefects[0].count} lần phát sinh)\n\n` : `\n`);
+
+            const timeS = `⏱️ 4. NĂNG SUẤT & BẤM GIỜ (TIME STUDY):\n` +
+              `- Số lượt thực hiện đo bấm giờ: ${sysTimeCount} lượt\n` +
+              (sysAvgCycleTime > 0 ? `- Thời gian hoàn thành công đoạn trung bình (Cycle Time): ${sysAvgCycleTime.toFixed(1)} giây\n\n` : `\n`);
+
+            const meet = `📅 5. HỌP GIAO BAN & TRIỂN KHAI:\n` +
+              `- Số cuộc họp triển khai đã tổ chức: ${sysMeetings.length} cuộc họp\n` +
+              (sysMeetings.length > 0 ? sysMeetings.slice(0, 2).map((m, i) => `  + Họp ${m.type === "company" ? "Toàn công ty" : "Tổ/Chuyền"}: ${m.topic} (${m.date})`).join("\n") + "\n\n" : `\n`);
+
+            const dty = `🧹 6. VỆ SINH & TRỰC NHẬT:\n` +
+              `- Đã thực hiện dọn dẹp vệ sinh: ${sysDutiesCount} ca trực\n\n`;
+
+            const footer = `Báo cáo hoạt động tự động của hệ thống quản lý dệt may GarmentOps.`;
+
+            const fullText = title + separator + prod + att + qual + timeS + meet + dty + footer;
+
+            navigator.clipboard.writeText(fullText).then(() => {
+              setSysCopiedSuccess(true);
+              setTimeout(() => setSysCopiedSuccess(false), 2000);
+            }).catch(err => {
+              console.error("Failed to copy system report: ", err);
+            });
+          };
+
+          const handleDownloadSysCSV = () => {
+            let periodStr = "";
+            if (sysReportPeriod === "day") {
+              periodStr = safeFormatDate(sysReportDate, "dd-MM-yyyy");
+            } else if (sysReportPeriod === "week") {
+              periodStr = `tuan-${safeFormatDate(sysReportDate, "dd-MM-yyyy")}`;
+            } else {
+              periodStr = `thang-${safeFormatDate(sysReportDate, "MM-yyyy")}`;
+            }
+
+            let csv = "\uFEFF"; // BOM UTF-8
+            csv += `BÁO CÁO HOẠT ĐỘNG TOÀN DIỆN DOANH NGHIỆP DỆT MAY\n`;
+            csv += `Kỳ báo cáo,${sysReportPeriod === "day" ? "Ngày" : sysReportPeriod === "week" ? "Tuần" : "Tháng"} ${periodStr}\n`;
+            csv += `Thời gian xuất,${new Date().toLocaleString("vi-VN")}\n\n`;
+
+            csv += `1. CHỈ SỐ HOẠT ĐỘNG CHÍNH (KPIs)\n`;
+            csv += `Chỉ số,Kết quả,Ghi chú\n`;
+            csv += `Tổng sản lượng thực tế,${sysTotalQty} pcs,Sản lượng công đoạn cuối các chuyền\n`;
+            csv += `Tiến độ hoàn thành đơn hàng,${sysOverallProgress.toFixed(2)}%,So với tổng yêu cầu kế hoạch\n`;
+            csv += `Tỷ lệ đi làm trung bình,${((sysPresentAvg / (workers.length || 1)) * 100).toFixed(1)}%,Trung bình chuyên cần ngày\n`;
+            csv += `Tổng số lượt vắng mặt,${sysAbsentTotal} lượt,Danh sách vắng mặt chi tiết bên dưới\n`;
+            csv += `Tổng số lượt đi muộn,${sysLateTotal} lượt,Danh sách đi muộn chi tiết bên dưới\n`;
+            csv += `Tỷ lệ sai hỏng chất lượng,${sysDefectRate.toFixed(2)}%,Số sản phẩm lỗi trên mẫu kiểm tra\n`;
+            csv += `Tổng số ca trực vệ sinh,${sysDutiesCount} ca,Lịch trực nhật trong kỳ\n`;
+            csv += `Số cuộc họp đã tổ chức,${sysMeetings.length} cuộc,Cuộc họp triển khai\n\n`;
+
+            csv += `2. CHI TIẾT SẢN LƯỢNG THEO CHUYỀN MAY\n`;
+            csv += `Tên chuyền,Sản lượng hoàn thành (pcs)\n`;
+            sysLineBreakdown.forEach(l => {
+              csv += `"${l.line}",${l.qty}\n`;
+            });
+            csv += `\n`;
+
+            csv += `3. CHI TIẾT CÁC LOẠI LỖI CHẤT LƯỢNG\n`;
+            csv += `Loại lỗi,Số lượng mẫu lỗi phát hiện\n`;
+            sysTopDefects.forEach(d => {
+              csv += `"${d.type}",${d.count}\n`;
+            });
+            csv += `\n`;
+
+            csv += `4. CHI TIẾT CUỘC HỌP GIAO BAN\n`;
+            csv += `Ngày,Hình thức,Chủ đề,Ghi chú nội dung\n`;
+            sysMeetings.forEach(m => {
+              csv += `"${m.date}","${m.type === "company" ? "Công ty" : "Tổ/Chuyền"}","${m.topic}","${(m.notes || "").replace(/"/g, '""')}"\n`;
+            });
+            csv += `\n`;
+
+            csv += `5. DANH SÁCH NHÂN SỰ VẮNG MẶT / ĐI TRỄ\n`;
+            csv += `Ngày,Họ và tên,Tổ / Chuyền,Trạng thái,Thời gian trễ,Lý do\n`;
+            sysAbsentsList.forEach(a => {
+              csv += `"${a.date}","${a.name}","${a.line}","Vắng mặt","-","${a.reason}"\n`;
+            });
+            sysLatesList.forEach(l => {
+              csv += `"${l.date}","${l.name}","${l.line}","Đi trễ","${l.time}","${l.reason}"\n`;
+            });
+
+            const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+            const url = URL.createObjectURL(blob);
+            const link = document.createElement("a");
+            link.setAttribute("href", url);
+            link.setAttribute("download", `bao_cao_hoat_dong_tong_hop_${periodStr}.csv`);
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+          };
+
+          return (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="fixed inset-0 z-[201] flex items-center justify-center p-4 bg-gray-950/60 backdrop-blur-sm"
+            >
+              <motion.div
+                initial={{ scale: 0.95, y: 20 }}
+                animate={{ scale: 1, y: 0 }}
+                exit={{ scale: 0.95, y: 20 }}
+                className="bg-white rounded-3xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden text-left"
+              >
+                {/* Header */}
+                <div className="p-6 border-b border-gray-100 flex items-center justify-between bg-emerald-50/40">
+                  <div className="flex items-center gap-3">
+                    <div className="h-10 w-10 bg-emerald-50 text-emerald-600 rounded-xl flex items-center justify-center font-bold shadow-sm">
+                      <FileText size={20} />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black text-emerald-950 uppercase tracking-wide">
+                        Báo Cáo Tổng Hợp Toàn Bộ Hoạt Động
+                      </h3>
+                      <p className="text-xs text-emerald-700/80 font-bold uppercase tracking-wider">
+                        Số liệu kế hoạch, sản lượng, chấm công, kiểm lỗi & họp ban
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setIsOpenSystemReportModal(false)}
+                    className="bg-gray-100 hover:bg-gray-200 text-gray-500 h-8 w-8 rounded-full flex items-center justify-center transition-colors cursor-pointer border-0"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+
+                {/* Date Navigator & Filters Bar */}
+                <div className="bg-gray-50/50 p-4 border-b border-gray-100 flex flex-wrap gap-4 items-center justify-between">
+                  <div className="flex flex-wrap items-center gap-3">
+                    <div className="grid grid-cols-3 gap-1 bg-white p-1 rounded-xl border border-gray-150 max-w-xs shadow-sm">
+                      <button
+                        onClick={() => setSysReportPeriod("day")}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                          sysReportPeriod === "day" ? "bg-emerald-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-900"
+                        }`}
+                      >
+                        Ngày
+                      </button>
+                      <button
+                        onClick={() => setSysReportPeriod("week")}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                          sysReportPeriod === "week" ? "bg-emerald-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-900"
+                        }`}
+                      >
+                        Tuần
+                      </button>
+                      <button
+                        onClick={() => setSysReportPeriod("month")}
+                        className={`py-1.5 px-3 rounded-lg text-xs font-black cursor-pointer transition-all ${
+                          sysReportPeriod === "month" ? "bg-emerald-600 text-white shadow-sm" : "text-gray-500 hover:text-gray-900"
+                        }`}
+                      >
+                        Tháng
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between bg-white p-1 rounded-xl border border-gray-150 min-w-[160px] shadow-sm">
+                      <button
+                        onClick={handlePrevSysPeriod}
+                        className="p-1.5 hover:bg-gray-50 rounded-lg text-gray-500 hover:text-gray-900 transition-colors cursor-pointer"
+                      >
+                        <ChevronLeft size={14} />
+                      </button>
+                      <span className="text-[11px] font-black text-gray-900 truncate px-2">
+                        {sysReportPeriod === "day" && safeFormatDate(sysReportDate, "dd/MM/yyyy")}
+                        {sysReportPeriod === "week" && `Tuần: ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}`}
+                        {sysReportPeriod === "month" && `Tháng: ${safeFormatDate(sysReportDate, "MM/yyyy")}`}
+                      </span>
+                      <button
+                        onClick={handleNextSysPeriod}
+                        className="p-1.5 hover:bg-gray-50 rounded-lg text-gray-500 hover:text-gray-900 transition-colors cursor-pointer"
+                      >
+                        <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Export Quick Actions */}
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={handleCopySysReport}
+                      className="bg-amber-600 hover:bg-amber-700 text-white font-black px-3 py-2 rounded-xl flex items-center gap-1 transition-all text-xs cursor-pointer shadow-sm border-0"
+                    >
+                      <Clipboard size={13} />
+                      <span>{sysCopiedSuccess ? "Đã sao chép" : "Zalo / Chat"}</span>
+                    </button>
+                    <button
+                      onClick={handleDownloadSysCSV}
+                      className="bg-emerald-600 hover:bg-emerald-700 text-white font-black px-3 py-2 rounded-xl flex items-center gap-1 transition-all text-xs cursor-pointer shadow-sm border-0"
+                    >
+                      <FileSpreadsheet size={13} />
+                      <span>Tải Excel</span>
+                    </button>
+                    <button
+                      onClick={handlePrintSysReport}
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white font-black px-3 py-2 rounded-xl flex items-center gap-1 transition-all text-xs cursor-pointer shadow-sm border-0"
+                    >
+                      <Printer size={13} />
+                      <span>In báo cáo</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Body scrollarea */}
+                <div className="p-6 space-y-6 overflow-y-auto flex-1">
+                  {/* Summary Overview Title */}
+                  <div className="text-center pb-2 border-b border-gray-100">
+                    <h2 className="text-base font-black text-gray-900 uppercase">
+                      Báo Cáo Tổng Hợp Toàn Bộ Hoạt Động Doanh Nghiệp
+                    </h2>
+                    <p className="text-xs text-gray-500 font-semibold mt-1">
+                      Kỳ báo cáo: {sysReportPeriod === "day" ? `Ngày ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}` : sysReportPeriod === "week" ? `Tuần ${safeFormatDate(sysReportDate, "dd/MM/yyyy")}` : `Tháng ${safeFormatDate(sysReportDate, "MM/yyyy")}`}
+                    </p>
+                  </div>
+
+                  {/* System KPIs Bento Grid */}
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                    <div className="bg-emerald-50/40 border border-emerald-100 p-4 rounded-2xl">
+                      <span className="text-[10px] font-black uppercase text-emerald-700 block">Sản Lượng Hoàn Thành</span>
+                      <span className="text-lg font-black text-emerald-950 mt-1 block">
+                        {sysTotalQty.toLocaleString()} <span className="text-xs text-emerald-600">pcs</span>
+                      </span>
+                    </div>
+                    <div className="bg-indigo-50/40 border border-indigo-100 p-4 rounded-2xl">
+                      <span className="text-[10px] font-black uppercase text-indigo-700 block">Tiến Độ Kế Hoạch Chung</span>
+                      <span className="text-lg font-black text-indigo-950 mt-1 block">
+                        {sysOverallProgress.toFixed(1)}%
+                      </span>
+                    </div>
+                    <div className="bg-amber-50/40 border border-amber-100 p-4 rounded-2xl">
+                      <span className="text-[10px] font-black uppercase text-amber-700 block">Tỷ Lệ Đi Làm Bình Quân</span>
+                      <span className="text-lg font-black text-amber-950 mt-1 block">
+                        {workers.length > 0 ? `${((sysPresentAvg / workers.length) * 100).toFixed(0)}%` : "0%"}
+                      </span>
+                    </div>
+                    <div className="bg-rose-50/40 border border-rose-100 p-4 rounded-2xl">
+                      <span className="text-[10px] font-black uppercase text-rose-700 block">Lượt Vắng / Đi Muộn</span>
+                      <span className="text-lg font-black text-rose-950 mt-1 block">
+                        {sysAbsentTotal} <span className="text-xs">vắng</span> / {sysLateTotal} <span className="text-xs">muộn</span>
+                      </span>
+                    </div>
+                    <div className="bg-purple-50/40 border border-purple-100 p-4 rounded-2xl">
+                      <span className="text-[10px] font-black uppercase text-purple-700 block">Tỷ Lệ Sai Hỏng (Quality)</span>
+                      <span className="text-lg font-black text-purple-950 mt-1 block">
+                        {sysDefectRate.toFixed(2)}%
+                      </span>
+                    </div>
+                    <div className="bg-blue-50/40 border border-blue-100 p-4 rounded-2xl">
+                      <span className="text-[10px] font-black uppercase text-blue-700 block">Vệ Sinh & Bấm Giờ</span>
+                      <span className="text-lg font-black text-blue-950 mt-1 block">
+                        {sysDutiesCount} <span className="text-xs">ca</span> / {sysTimeCount} <span className="text-xs">đo</span>
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Row 1: Line breakdown & Quality defects breakdown */}
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Line Breakdown */}
+                    <div className="bg-white border border-gray-150 rounded-2xl p-4">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-gray-900 border-b border-gray-100 pb-2 mb-3">
+                        📊 Năng Suất Theo Chuyền May
+                      </h4>
+                      {sysLineBreakdown.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-6 text-center italic">Không có dữ liệu sản lượng</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {sysLineBreakdown.map((l, index) => {
+                            const max = sysLineBreakdown[0]?.qty || 1;
+                            const pct = (l.qty / max) * 100;
+                            return (
+                              <div key={l.line} className="text-xs">
+                                <div className="flex justify-between font-bold text-gray-800 mb-1">
+                                  <span>Chuyền: {l.line}</span>
+                                  <span>{l.qty.toLocaleString()} pcs</span>
+                                </div>
+                                <div className="w-full bg-gray-100 rounded-full h-2">
+                                  <div className="bg-emerald-600 h-2 rounded-full" style={{ width: `${pct}%` }} />
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Defect types */}
+                    <div className="bg-white border border-gray-150 rounded-2xl p-4">
+                      <h4 className="text-xs font-black uppercase tracking-wider text-gray-900 border-b border-gray-100 pb-2 mb-3">
+                        🧵 Cơ Cấu Lỗi Chất Lượng
+                      </h4>
+                      {sysTopDefects.length === 0 ? (
+                        <p className="text-xs text-gray-400 py-6 text-center italic">Không phát hiện lỗi chất lượng</p>
+                      ) : (
+                        <div className="space-y-2">
+                          {sysTopDefects.slice(0, 5).map((d) => {
+                            const pct = sysTotalDefects > 0 ? (d.count / sysTotalDefects) * 100 : 0;
+                            return (
+                              <div key={d.type} className="text-xs flex justify-between items-center p-2 rounded-xl bg-gray-50 border border-gray-100">
+                                <span className="font-bold text-gray-800">{d.type}</span>
+                                <span className="font-mono font-black text-rose-600">{d.count} pcs ({pct.toFixed(0)}%)</span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Row 2: Meetings & Staff details */}
+                  <div className="bg-white border border-gray-150 rounded-2xl p-4">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-gray-900 border-b border-gray-100 pb-2 mb-3">
+                      📅 Lịch Họp Giao Ban & Triển Khai
+                    </h4>
+                    {sysMeetings.length === 0 ? (
+                      <p className="text-xs text-gray-400 py-6 text-center italic">Không tổ chức họp giao ban trong kỳ</p>
+                    ) : (
+                      <div className="space-y-2">
+                        {sysMeetings.map((m) => (
+                          <div key={m.id} className="text-xs p-3 rounded-xl bg-gray-50 border border-gray-100 flex flex-col md:flex-row md:items-center justify-between gap-2">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-indigo-600 uppercase">[{m.type === "company" ? "Công ty" : "Chuyền"}]</span>
+                              <span className="font-bold text-gray-950">{m.topic}</span>
+                            </div>
+                            <div className="flex items-center gap-3 text-[10px] text-gray-400 font-mono">
+                              <span>Ngày: {m.date}</span>
+                              <span className="italic truncate max-w-[200px]">{m.notes}</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Absenteeism & Latency details */}
+                  <div className="bg-white border border-gray-150 rounded-2xl p-4">
+                    <h4 className="text-xs font-black uppercase tracking-wider text-gray-900 border-b border-gray-100 pb-2 mb-3">
+                      👷 Chi Tiết Đi Trễ / Vắng Mặt
+                    </h4>
+                    {sysAbsentsList.length === 0 && sysLatesList.length === 0 ? (
+                      <p className="text-xs text-emerald-600 py-6 text-center font-bold">✓ Toàn bộ công nhân đi làm đầy đủ và đúng giờ!</p>
+                    ) : (
+                      <div className="max-h-[220px] overflow-y-auto space-y-2">
+                        {sysAbsentsList.map((a, i) => (
+                          <div key={`abs-${i}`} className="text-xs p-2 rounded-xl bg-rose-50/50 border border-rose-100 flex justify-between items-center">
+                            <div>
+                              <span className="font-bold text-gray-950">{a.name}</span>
+                              <span className="text-[10px] text-gray-400 ml-2">Chuyền {a.line} &bull; {a.date}</span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-rose-100 text-rose-700 font-black">
+                              Vắng mặt ({a.reason})
+                            </span>
+                          </div>
+                        ))}
+                        {sysLatesList.map((l, i) => (
+                          <div key={`late-${i}`} className="text-xs p-2 rounded-xl bg-amber-50/50 border border-amber-100 flex justify-between items-center">
+                            <div>
+                              <span className="font-bold text-gray-950">{l.name}</span>
+                              <span className="text-[10px] text-gray-400 ml-2">Chuyền {l.line} &bull; {l.date}</span>
+                            </div>
+                            <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-black">
+                              Trễ {l.time} ({l.reason})
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer controls */}
+                <div className="p-4 border-t border-gray-100 bg-gray-50 flex justify-end">
+                  <button
+                    onClick={() => setIsOpenSystemReportModal(false)}
+                    className="px-5 py-2 rounded-xl bg-white border border-gray-200 hover:bg-gray-50 text-gray-700 font-bold text-xs uppercase tracking-wider cursor-pointer shadow-sm transition-all border-0"
+                  >
+                    Đóng Báo Cáo
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          );
+        })()}
       </AnimatePresence>
     </div>
   );
