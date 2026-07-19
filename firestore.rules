@@ -115,6 +115,20 @@ service cloud.firestore {
              data.content is string && data.content.size() <= 10000;
     }
 
+    function isValidQualityLog(data, userId) {
+      return data.keys().hasAll(['date', 'line', 'workerId', 'operationId', 'totalChecked', 'defectCount', 'defectType', 'severity', 'userId']) &&
+             data.keys().size() <= 12 &&
+             data.userId == userId &&
+             data.date is string &&
+             data.line is string &&
+             data.workerId is string &&
+             data.operationId is string &&
+             data.totalChecked is number && data.totalChecked >= 0 &&
+             data.defectCount is number && data.defectCount >= 0 &&
+             data.defectType is string && data.defectType.size() <= 200 &&
+             data.severity is string && (data.severity == 'mild' || data.severity == 'moderate' || data.severity == 'critical');
+    }
+
     // --- Collection Matches ---
 
     match /users/{userId} {
@@ -200,6 +214,13 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(meetingId) && isValidMeeting(incoming(), userId);
         allow update: if isOwner(userId) && isValidMeeting(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /qualityLogs/{logId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(logId) && isValidQualityLog(incoming(), userId);
+        allow update: if isOwner(userId) && isValidQualityLog(incoming(), userId);
         allow delete: if isOwner(userId);
       }
     }

@@ -2454,7 +2454,7 @@ export default function App() {
   const recentLogs = logs.slice(-10).reverse();
 
   return (
-    <div className="min-h-screen bg-[#FDFDFF] text-gray-900 font-sans pb-24 md:pb-8 pt-16">
+    <div className={`min-h-screen bg-[#FDFDFF] text-gray-900 font-sans pb-28 md:pb-8 pt-16 ${user ? "md:pl-64" : ""}`}>
       {/* Top Header */}
       <header className="fixed top-0 left-0 right-0 h-16 bg-white border-b border-gray-100 z-50 px-6 flex items-center justify-between shadow-sm backdrop-blur-md bg-white/80">
         <div className="flex items-center gap-3">
@@ -2603,6 +2603,26 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* Desktop Sidebar */}
+      {user && (
+        <aside className="hidden md:flex flex-col w-64 fixed left-0 top-16 bottom-0 bg-white border-r border-gray-100 p-4 space-y-1.5 z-40 overflow-y-auto">
+          {sidebarItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id as Tab)}
+              className={`flex items-center gap-3 w-full px-4 py-3 rounded-2xl transition-all cursor-pointer text-xs font-black uppercase tracking-wider ${
+                activeTab === item.id
+                  ? "bg-indigo-50 text-indigo-600 shadow-sm"
+                  : "text-gray-500 hover:text-gray-900 hover:bg-gray-50/80"
+              }`}
+            >
+              <item.icon size={18} className={activeTab === item.id ? "text-indigo-600" : "text-gray-400"} />
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </aside>
+      )}
 
       {/* Main Content Area */}
       <main className="max-w-[96%] lg:max-w-[92%] xl:max-w-[1550px] mx-auto px-4 sm:px-6 lg:px-8 py-8 w-full">
@@ -8277,35 +8297,37 @@ export default function App() {
         </div>
       </main>
 
-      {/* Bottom Navigation (Mobile & Desktop) */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 flex justify-around items-center h-20 px-2 shadow-[0_-4px_20px_rgba(0,0,0,0.03)] backdrop-blur-lg bg-white/90">
-        {sidebarItems.map((item) => (
-          <button
-            key={item.id}
-            onClick={() => setActiveTab(item.id as Tab)}
-            className={`flex flex-col items-center justify-center gap-1 flex-1 py-2 px-1 transition-all ${
-              activeTab === item.id
-                ? "text-indigo-600"
-                : "text-gray-400 hover:text-gray-600"
-            }`}
-          >
-            <div
-              className={`p-2 rounded-xl transition-all ${activeTab === item.id ? "bg-indigo-50 scale-110" : ""}`}
+      {/* Bottom Navigation (Mobile) */}
+      {user && (
+        <nav className="fixed bottom-0 left-0 right-0 bg-white border-t border-gray-100 z-50 flex items-center h-20 px-4 gap-2 shadow-[0_-4px_20px_rgba(0,0,0,0.03)] backdrop-blur-lg bg-white/90 overflow-x-auto scrollbar-none md:hidden">
+          {sidebarItems.map((item) => (
+            <button
+              key={item.id}
+              onClick={() => setActiveTab(item.id as Tab)}
+              className={`flex flex-col items-center justify-center gap-1 flex-shrink-0 min-w-[76px] py-2 px-1 transition-all relative ${
+                activeTab === item.id
+                  ? "text-indigo-600"
+                  : "text-gray-400 hover:text-gray-600"
+              }`}
             >
-              <item.icon size={20} />
-            </div>
-            <span className="text-[11px] sm:text-xs font-bold uppercase tracking-normal sm:tracking-wide">
-              {item.label}
-            </span>
-            {activeTab === item.id && (
-              <motion.div
-                layoutId="nav-pill"
-                className="absolute -top-[1px] w-8 h-1 bg-indigo-600 rounded-full"
-              />
-            )}
-          </button>
-        ))}
-      </nav>
+              <div
+                className={`p-2 rounded-xl transition-all ${activeTab === item.id ? "bg-indigo-50 scale-110" : ""}`}
+              >
+                <item.icon size={20} />
+              </div>
+              <span className="text-[10px] sm:text-xs font-bold uppercase tracking-normal sm:tracking-wide">
+                {item.label}
+              </span>
+              {activeTab === item.id && (
+                <motion.div
+                  layoutId="nav-pill"
+                  className="absolute -top-[1px] w-8 h-1 bg-indigo-600 rounded-full"
+                />
+              )}
+            </button>
+          ))}
+        </nav>
+      )}
 
       {/* Plan Image Zoom Modal Overlay */}
       <AnimatePresence>

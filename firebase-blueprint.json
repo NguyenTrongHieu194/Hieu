@@ -189,6 +189,25 @@
         "createdAt": { "type": "string", "format": "date-time" }
       },
       "required": ["date", "type", "content", "userId"]
+    },
+    "QualityLog": {
+      "title": "Quality Log",
+      "description": "Daily quality check records for sewing operations and workers",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "line": { "type": "string" },
+        "workerId": { "type": "string" },
+        "operationId": { "type": "string" },
+        "totalChecked": { "type": "number" },
+        "defectCount": { "type": "number" },
+        "defectType": { "type": "string" },
+        "severity": { "type": "string", "enum": ["mild", "moderate", "critical"] },
+        "notes": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "line", "workerId", "operationId", "totalChecked", "defectCount", "defectType", "severity", "userId"]
     }
   },
   "firestore": {
@@ -243,6 +262,10 @@
     "users/{userId}/meetings": {
       "schema": "Meeting",
       "description": "User's worker or company meeting notes database"
+    },
+    "users/{userId}/qualityLogs": {
+      "schema": "QualityLog",
+      "description": "User's sewing quality check records database"
     }
   }
 }
