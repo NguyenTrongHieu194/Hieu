@@ -47,16 +47,29 @@ export const QualityTab: React.FC<QualityTabProps> = ({
   const [formSeverity, setFormSeverity] = useState<"mild" | "moderate" | "critical">("mild");
   const [formNotes, setFormNotes] = useState("");
 
-  const defectTypePresets = [
+  const defaultPresets = [
     "Bỏ mũi",
     "Đứt chỉ",
     "Lệch đường may",
     "Nhăn sườn",
     "Lỗi rập",
     "Bẩn dầu",
-    "Thủng vải",
-    "Khác"
+    "Thủng vải"
   ];
+
+  const [customPresets, setCustomPresets] = useState<string[]>(() => {
+    try {
+      const stored = localStorage.getItem("custom_defect_types");
+      return stored ? JSON.parse(stored) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  const [newCustomPresetInput, setNewCustomPresetInput] = useState("");
+  const [showAddPresetInput, setShowAddPresetInput] = useState(false);
+
+  const defectTypePresets = [...defaultPresets, ...customPresets, "Khác"];
 
   // Date Navigation Helpers
   const handlePrevPeriod = () => {
@@ -214,7 +227,7 @@ export const QualityTab: React.FC<QualityTabProps> = ({
       defectCount: Number(formDefectCount),
       defectType: finalDefectType,
       severity: formSeverity,
-      notes: formNotes.trim() || undefined
+      notes: formNotes.trim() || ""
     };
 
     try {
@@ -845,9 +858,68 @@ export const QualityTab: React.FC<QualityTabProps> = ({
               {/* Defect Type Preset & Custom */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block mb-1">
-                    Loại Lỗi Thường Gặp
-                  </label>
+                  <div className="flex justify-between items-center mb-1">
+                    <label className="text-[10px] font-black uppercase text-gray-400 tracking-wider block">
+                      Loại Lỗi Thường Gặp
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddPresetInput(!showAddPresetInput)}
+                      className="text-[10px] text-indigo-600 font-bold hover:underline cursor-pointer flex items-center gap-0.5"
+                    >
+                      <Plus size={10} /> {showAddPresetInput ? "Đóng" : "Bổ sung lỗi"}
+                    </button>
+                  </div>
+                  {showAddPresetInput && (
+                    <div className="flex gap-2 mb-2 bg-indigo-50/50 p-2 rounded-xl border border-indigo-100/40">
+                      <input
+                        type="text"
+                        placeholder="e.g. Sổ chỉ, Lỏng sợi..."
+                        value={newCustomPresetInput}
+                        onChange={(e) => setNewCustomPresetInput(e.target.value)}
+                        className="flex-1 bg-white border border-gray-200 text-xs font-semibold p-1.5 rounded-lg focus:outline-none focus:ring-1 focus:ring-indigo-300"
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            const val = newCustomPresetInput.trim();
+                            if (val) {
+                              if (defectTypePresets.includes(val)) {
+                                alert("Loại lỗi này đã tồn tại!");
+                                return;
+                              }
+                              const updated = [...customPresets, val];
+                              setCustomPresets(updated);
+                              localStorage.setItem("custom_defect_types", JSON.stringify(updated));
+                              setFormDefectType(val);
+                              setNewCustomPresetInput("");
+                              setShowAddPresetInput(false);
+                            }
+                          }
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const val = newCustomPresetInput.trim();
+                          if (val) {
+                            if (defectTypePresets.includes(val)) {
+                              alert("Loại lỗi này đã tồn tại!");
+                              return;
+                            }
+                            const updated = [...customPresets, val];
+                            setCustomPresets(updated);
+                            localStorage.setItem("custom_defect_types", JSON.stringify(updated));
+                            setFormDefectType(val);
+                            setNewCustomPresetInput("");
+                            setShowAddPresetInput(false);
+                          }
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 rounded-lg cursor-pointer"
+                      >
+                        Thêm
+                      </button>
+                    </div>
+                  )}
                   <select
                     value={formDefectType}
                     onChange={(e) => setFormDefectType(e.target.value)}
