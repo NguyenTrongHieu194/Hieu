@@ -1132,6 +1132,7 @@ export default function App() {
     style: "",
     sam: 0,
     target: 0,
+    isCritical: false,
   });
   const [isExtracting, setIsExtracting] = useState(false);
   const [isExtractingWorker, setIsExtractingWorker] = useState(false);
@@ -1148,6 +1149,7 @@ export default function App() {
   const [workerLogType, setWorkerLogType] = useState<"daily" | "hourly">("hourly");
   const [workerLogHourRange, setWorkerLogHourRange] = useState("7h30-8h30");
   const [workerLogQty, setWorkerLogQty] = useState<number>(0);
+  const [workerLogIsCritical, setWorkerLogIsCritical] = useState(false);
   const [expandedWorkerId, setExpandedWorkerId] = useState<string | null>(null);
   const [isExtractingEff, setIsExtractingEff] = useState(false);
   const effFileInputRef = useRef<HTMLInputElement>(null);
@@ -1334,7 +1336,8 @@ export default function App() {
       style: op.style,
       logType: "hourly",
       hourRange: workerLogHourRange,
-      actualQuantity: workerLogQty
+      actualQuantity: workerLogQty,
+      isCritical: !!workerLogIsCritical
     };
 
     const logId = `wl_${Date.now()}`;
@@ -1736,9 +1739,10 @@ export default function App() {
       style: newOperation.style.trim() || "",
       sam: Number(newOperation.sam) || 0,
       targetPerHour: Number(newOperation.target) || 0,
+      isCritical: !!newOperation.isCritical,
     };
     await addDocToFirestore("operations", op);
-    setNewOperation({ name: "", code: "", style: "", sam: 0, target: 0 });
+    setNewOperation({ name: "", code: "", style: "", sam: 0, target: 0, isCritical: false });
   };
 
   const handleDeleteOperation = async (id: string) => {
@@ -2751,82 +2755,41 @@ export default function App() {
               const todaySweepers = (todayDuty.sweeperIds || []).map(id => workers.find(w => w.id === id)?.name || "").filter(Boolean);
               const todayTrash = (todayDuty.trashCollectorIds || []).map(id => workers.find(w => w.id === id)?.name || "").filter(Boolean);
 
-              // 3. Sản lượng công đoạn cuối (Final Op Production Stats)
-              let finalOpTotal = 0;
-              const finalOpLineBreakdown = lines.map(line => {
+              // 3. Sản lượng công đoạn quan trọng (Critical Op Production Stats)
+              let criticalOpTotal = 0;
+              const criticalOpLineBreakdown = lines.map(line => {
                 let lineTotal = 0;
-                let activeLastWorkerName = "Không có";
-                let activeLastOpCode = "N/A";
-                let activeLastOpName = "Chưa làm";
-
-                const periodLogsWithRecords = workerHourlyLogs
-                  .filter(log => isDateInPeriod(log.date) && log.line === line)
-                  .sort((a, b) => b.date.localeCompare(a.date));
-
-                if (periodLogsWithRecords.length > 0) {
-                  const datesWithLogs = Array.from(new Set(periodLogsWithRecords.map(log => log.date)));
-                  
-                  datesWithLogs.forEach(date => {
-                    const lineWorkers = workers.filter(w => w.line === line);
-                    const filteredLogs = workerHourlyLogs.filter(log => log.date === date && log.line === line);
-                    const sortedLineWorkers = [...lineWorkers].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
-                    const activeWorkersWithLogsList = sortedLineWorkers.filter(w => filteredLogs.some(log => log.workerId === w.id));
-                    const lastWorker = activeWorkersWithLogsList[activeWorkersWithLogsList.length - 1];
-
-                    if (lastWorker) {
-                      const lastWorkerLogs = filteredLogs.filter(log => log.workerId === lastWorker.id);
-                      const uniqueOpIds = Array.from(new Set(lastWorkerLogs.map(log => log.opId)));
-                      const sortedOpsOfLastWorker = uniqueOpIds.map(opId => {
-                        const op = operations.find(o => o.id === opId);
-                        return {
-                          id: opId,
-                          code: op?.code || lastWorkerLogs.find(l => l.opId === opId)?.opCode || "",
-                          name: op?.name || lastWorkerLogs.find(l => l.opId === opId)?.opName || ""
-                        };
-                      }).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
-
-                      const lastOp = sortedOpsOfLastWorker[sortedOpsOfLastWorker.length - 1];
-                      if (lastOp) {
-                        const finalOpLogs = lastWorkerLogs.filter(log => log.opId === lastOp.id);
-                        lineTotal += finalOpLogs.reduce((sum, log) => sum + (Number(log.actualQuantity) || 0), 0);
-                      }
-                    }
-                  });
-
-                  const latestDate = datesWithLogs[0];
-                  const lineWorkers = workers.filter(w => w.line === line);
-                  const filteredLogsForLatest = workerHourlyLogs.filter(log => log.date === latestDate && log.line === line);
-                  const sortedLineWorkers = [...lineWorkers].sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
-                  const activeWorkersWithLogsList = sortedLineWorkers.filter(w => filteredLogsForLatest.some(log => log.workerId === w.id));
-                  const lastWorker = activeWorkersWithLogsList[activeWorkersWithLogsList.length - 1];
-                  if (lastWorker) {
-                    activeLastWorkerName = lastWorker.name;
-                    const lastWorkerLogs = filteredLogsForLatest.filter(log => log.workerId === lastWorker.id);
-                    const uniqueOpIds = Array.from(new Set(lastWorkerLogs.map(log => log.opId)));
-                    const sortedOpsOfLastWorker = uniqueOpIds.map(opId => {
-                      const op = operations.find(o => o.id === opId);
-                      return {
-                        id: opId,
-                        code: op?.code || lastWorkerLogs.find(l => l.opId === opId)?.opCode || "",
-                        name: op?.name || lastWorkerLogs.find(l => l.opId === opId)?.opName || ""
-                      };
-                    }).sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: 'base' }));
-
-                    const lastOp = sortedOpsOfLastWorker[sortedOpsOfLastWorker.length - 1];
-                    if (lastOp) {
-                      activeLastOpCode = lastOp.code;
-                      activeLastOpName = lastOp.name;
-                    }
+                
+                const periodLogs = workerHourlyLogs.filter(log => isDateInPeriod(log.date) && log.line === line);
+                
+                const criticalLogs = periodLogs.filter(log => {
+                  if (log.isCritical) return true;
+                  const op = operations.find(o => o.id === log.opId);
+                  return op?.isCritical === true;
+                });
+                
+                const opGroups: { [opId: string]: { opCode: string; opName: string; style: string; total: number } } = {};
+                criticalLogs.forEach(log => {
+                  const opId = log.opId || "unknown";
+                  if (!opGroups[opId]) {
+                    opGroups[opId] = {
+                      opCode: log.opCode || "",
+                      opName: log.opName || "",
+                      style: log.style || "",
+                      total: 0
+                    };
                   }
-                }
-
-                finalOpTotal += lineTotal;
+                  opGroups[opId].total += Number(log.actualQuantity) || 0;
+                  lineTotal += Number(log.actualQuantity) || 0;
+                });
+                
+                const opsList = Object.values(opGroups);
+                criticalOpTotal += lineTotal;
+                
                 return {
                   line,
                   total: lineTotal,
-                  lastWorkerName: activeLastWorkerName,
-                  lastOpCode: activeLastOpCode,
-                  lastOpName: activeLastOpName
+                  opsList
                 };
               });
 
@@ -2954,19 +2917,19 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Real-Time Final Op Production Card */}
+                    {/* Real-Time Critical Op Production Card */}
                     <div className="bg-white p-5 rounded-2xl border border-gray-150 shadow-sm flex flex-col justify-between">
                       <div>
-                        <span className="text-[10px] font-black uppercase tracking-widest text-rose-500 block mb-1">SẢN LƯỢNG CÔNG ĐOẠN CUỐI</span>
+                        <span className="text-[10px] font-black uppercase tracking-widest text-rose-500 block mb-1">SẢN LƯỢNG ĐOẠN QUAN TRỌNG</span>
                         <h4 className="text-3xl font-black text-rose-600 font-mono">
-                          {finalOpTotal} <span className="text-xs font-bold text-gray-500">SP</span>
+                          {criticalOpTotal} <span className="text-xs font-bold text-gray-500">SP</span>
                         </h4>
                         <p className="text-xs text-gray-500 mt-1 font-semibold">
-                          Thực tế của công nhân cuối
+                          Sản lượng các công đoạn quan trọng
                         </p>
                       </div>
                       <div className="border-t border-gray-50 pt-2 mt-4 text-[11px] text-gray-400 font-bold uppercase truncate">
-                        ⚡ Real-time tự động cập nhật
+                        ⭐ Chỉ hiển thị đoạn quan trọng
                       </div>
                     </div>
 
@@ -2993,39 +2956,47 @@ export default function App() {
                     {/* Left & Center Columns: Logs & Summaries */}
                     <div className="lg:col-span-2 space-y-6">
                       
-                      {/* Real-time final production list */}
+                      {/* Real-time critical production list */}
                       <div className="bg-white p-6 rounded-2xl border border-gray-150 shadow-sm space-y-4">
                         <div className="flex items-center justify-between">
                           <div>
                             <h4 className="text-sm font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1.5">
-                              🏭 Sản lượng ngày của công đoạn cuối (Thời gian thực)
+                              🏭 Sản lượng đoạn quan trọng (Thời gian thực)
                             </h4>
-                            <p className="text-xs text-gray-400 mt-0.5">Tính chính xác dựa trên sản phẩm ghi nhận từ công nhân cuối của chuyền</p>
+                            <p className="text-xs text-gray-400 mt-0.5">Sản lượng các công đoạn được đánh dấu quan trọng để quản lý nút cổ chai</p>
                           </div>
                         </div>
 
                         <div className="space-y-3">
-                          {finalOpLineBreakdown.map(item => (
+                          {criticalOpLineBreakdown.map(item => (
                             <div key={item.line} className="bg-gray-50 p-4 rounded-xl border border-gray-100 hover:border-indigo-150 transition-colors">
-                              <div className="flex flex-col sm:flex-row justify-between sm:items-center gap-2 mb-2">
-                                <div className="flex items-center gap-2.5">
-                                  <span className="bg-indigo-600 text-white font-mono font-black text-xs px-2.5 py-1 rounded-lg">
-                                    {item.line}
-                                  </span>
-                                  <div>
-                                    <span className="text-xs font-bold text-gray-500 block sm:inline">Công nhân cuối: </span>
-                                    <span className="text-xs font-extrabold text-indigo-950">{item.lastWorkerName}</span>
-                                  </div>
-                                </div>
+                              <div className="flex justify-between items-center mb-2">
+                                <span className="bg-indigo-600 text-white font-mono font-black text-xs px-2.5 py-1 rounded-lg">
+                                  {item.line}
+                                </span>
                                 <div className="text-right">
                                   <span className="text-sm font-black text-rose-600 font-mono">{item.total}</span>
-                                  <span className="text-[10px] font-bold text-gray-400 uppercase ml-1">Sản phẩm</span>
+                                  <span className="text-[10px] font-bold text-gray-400 uppercase ml-1">Tổng sản phẩm</span>
                                 </div>
                               </div>
 
-                              <div className="flex items-center gap-2 mt-1 bg-white px-3 py-1.5 rounded-lg border border-gray-100 text-[11px] text-gray-500 font-medium">
-                                <span className="text-indigo-600 font-black">⚙️ CĐ cuối:</span>
-                                <span className="truncate">{item.lastOpCode !== "N/A" ? `${item.lastOpCode} - ${item.lastOpName}` : "Chưa có dữ liệu"}</span>
+                              <div className="space-y-1.5">
+                                {item.opsList.length === 0 ? (
+                                  <div className="text-[11px] text-gray-400 italic bg-white px-3 py-2 rounded-lg border border-gray-100 text-center">
+                                    Chưa ghi nhận sản lượng đoạn quan trọng nào trong kỳ.
+                                  </div>
+                                ) : (
+                                  item.opsList.map(op => (
+                                    <div key={op.opCode} className="flex justify-between items-center bg-white px-3 py-1.5 rounded-lg border border-gray-100 text-[11px]">
+                                      <div className="flex items-center gap-1.5 truncate">
+                                        <span className="text-rose-600 font-bold">⭐ [{op.opCode}]</span>
+                                        <span className="text-gray-700 font-semibold truncate">{op.opName}</span>
+                                        {op.style && <span className="text-[9px] bg-indigo-50 text-indigo-600 px-1.5 py-0.5 rounded font-mono font-bold">Style: {op.style}</span>}
+                                      </div>
+                                      <span className="font-bold text-rose-600 font-mono">{op.total} sp</span>
+                                    </div>
+                                  ))
+                                )}
                               </div>
                             </div>
                           ))}
@@ -3655,6 +3626,25 @@ export default function App() {
                       <Plus size={18} /> Thêm
                     </button>
                   </div>
+
+                  <div className="flex items-center gap-6 mt-4 bg-gray-50/50 p-3 rounded-xl border border-gray-100">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                      <input
+                        type="checkbox"
+                        checked={newOperation.isCritical}
+                        onChange={(e) =>
+                          setNewOperation({
+                            ...newOperation,
+                            isCritical: e.target.checked,
+                          })
+                        }
+                        className="h-4 w-4 text-rose-600 border-gray-300 rounded focus:ring-rose-500 cursor-pointer"
+                      />
+                      <span className="text-xs font-black text-rose-700 uppercase tracking-wide">
+                        ⭐ Đây là công đoạn quan trọng (Critical Operation)
+                      </span>
+                    </label>
+                  </div>
                 </div>
 
                 <div className="flex items-center justify-between bg-white p-4 rounded-xl border border-gray-100 mb-6">
@@ -3725,6 +3715,13 @@ export default function App() {
                         <h4 className="text-lg font-bold text-gray-900 uppercase tracking-tight">
                           {op.name}
                         </h4>
+                        {op.isCritical && (
+                          <div className="mt-1 flex items-center gap-1">
+                            <span className="bg-rose-50 text-rose-600 text-[10px] font-extrabold px-2 py-0.5 rounded-full uppercase tracking-tight flex items-center gap-0.5 border border-rose-100">
+                              ⭐ Đoạn quan trọng
+                            </span>
+                          </div>
+                        )}
                         <div className="mt-6 flex items-center justify-between border-t border-gray-50 pt-4">
                           <div>
                             <p className="text-xs uppercase text-gray-500 font-bold tracking-wider">
@@ -4332,7 +4329,12 @@ export default function App() {
                               </label>
                               <select
                                 value={workerLogOpId}
-                                onChange={(e) => setWorkerLogOpId(e.target.value)}
+                                onChange={(e) => {
+                                  const opId = e.target.value;
+                                  setWorkerLogOpId(opId);
+                                  const op = operations.find(o => o.id === opId);
+                                  setWorkerLogIsCritical(op ? !!op.isCritical : false);
+                                }}
                                 className="w-full p-2.5 rounded-xl border border-gray-200 text-xs font-semibold focus:ring-2 focus:ring-indigo-500 focus:outline-none bg-gray-50/50 cursor-pointer"
                               >
                                 <option value="">-- Chọn công đoạn --</option>
@@ -4342,6 +4344,20 @@ export default function App() {
                                   </option>
                                 ))}
                               </select>
+
+                              {/* Checkbox to mark as important in product input */}
+                              <div className="flex items-center gap-2 mt-1.5 px-1">
+                                <input
+                                  type="checkbox"
+                                  id="input_log_is_critical"
+                                  checked={workerLogIsCritical}
+                                  onChange={(e) => setWorkerLogIsCritical(e.target.checked)}
+                                  className="h-4 w-4 text-rose-600 border-gray-300 rounded focus:ring-rose-500 cursor-pointer"
+                                />
+                                <label htmlFor="input_log_is_critical" className="text-xs text-rose-700 font-bold select-none cursor-pointer flex items-center gap-1">
+                                  ⭐ Đánh dấu là đoạn quan trọng
+                                </label>
+                              </div>
                             </div>
 
                             <div className="space-y-1">
@@ -4479,7 +4495,7 @@ export default function App() {
                                                           </td>
                                                           <td className="py-2.5">
                                                             <p className="font-semibold text-gray-800 leading-tight">
-                                                              {log.opName}
+                                                              {log.opName} {log.isCritical && <span className="text-[9px] font-black text-rose-600 bg-rose-50 px-1.5 py-0.5 rounded border border-rose-100 ml-1 inline-flex items-center gap-0.5">⭐ Quan trọng</span>}
                                                             </p>
                                                             <p className="text-[9px] text-gray-400">
                                                               Style: {log.style} ({log.opCode})

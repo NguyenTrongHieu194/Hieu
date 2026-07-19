@@ -15,6 +15,7 @@ export interface Operation {
   style?: string; // Mã hàng liên kết
   sam: number; // Standard Allowed Minutes
   targetPerHour: number;
+  isCritical?: boolean; // Đánh dấu công đoạn quan trọng
 }
 
 export interface ProductionLog {
@@ -27,6 +28,7 @@ export interface ProductionLog {
   actualQuantity: number;
   hour: number; // Keep for some sorting/chart consistency if needed
   targetQuantity?: number;
+  isCritical?: boolean; // Đánh dấu là đoạn quan trọng
 }
 
 export interface ProductionOrder {
