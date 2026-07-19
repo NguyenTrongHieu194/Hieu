@@ -41,9 +41,11 @@ import {
   Search,
   CalendarRange,
   ArrowLeftRight,
+  ShieldAlert,
 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import UtilitiesTab from "./components/UtilitiesTab";
+import { QualityTab } from "./components/QualityTab";
 import { auth, db, signInWithGoogle, logOut, signInAsGuest, setCachedToken } from "./lib/firebase";
 import { onAuthStateChanged, User as FirebaseUser } from "firebase/auth";
 import {
@@ -67,6 +69,7 @@ import {
   ProductionLog,
   TimeStudyRecord,
   PlanFeedItem,
+  QualityLog,
 } from "./types";
 import { format } from "date-fns";
 import * as XLSX from "xlsx";
@@ -92,6 +95,7 @@ type Tab =
   | "planning"
   | "timestudy"
   | "duty"
+  | "quality"
   | "utilities";
 
 enum OperationType {
@@ -459,6 +463,7 @@ export default function App() {
   const [duties, setDuties] = useState<any[]>([]);
   const [lineDuties, setLineDuties] = useState<any[]>([]);
   const [meetings, setMeetings] = useState<any[]>([]);
+  const [qualityLogs, setQualityLogs] = useState<QualityLog[]>([]);
 
   // Auth Effect
   useEffect(() => {
@@ -510,6 +515,7 @@ export default function App() {
       setDuties([]);
       setLineDuties([]);
       setMeetings([]);
+      setQualityLogs([]);
       return;
     }
 
@@ -577,6 +583,9 @@ export default function App() {
           createdAt: new Date().toISOString()
         }
       ]);
+
+      const storedQualityLogs = localStorage.getItem('garmentops_demo_quality_logs');
+      setQualityLogs(storedQualityLogs ? JSON.parse(storedQualityLogs) : []);
 
       workersLoadedRef.current = true;
       return;
@@ -738,6 +747,19 @@ export default function App() {
         ),
     );
 
+    const unsubQualityLogs = onSnapshot(
+      collection(db, `${userPath}/qualityLogs`),
+      (snap) => {
+        setQualityLogs(snap.docs.map((d) => ({ id: d.id, ...d.data() as any })));
+      },
+      (err) =>
+        handleFirestoreError(
+          err,
+          OperationType.LIST,
+          `${userPath}/qualityLogs`,
+        ),
+    );
+
     return () => {
       unsubLines();
       unsubWorkers();
@@ -751,6 +773,7 @@ export default function App() {
       unsubLineDuties();
       unsubWorkerHourlyLogs();
       unsubMeetings();
+      unsubQualityLogs();
     };
   }, [user]);
 
@@ -803,6 +826,10 @@ export default function App() {
         const next = [newItem, ...meetings];
         setMeetings(next);
         localStorage.setItem('garmentops_demo_meetings', JSON.stringify(next));
+      } else if (col === 'qualityLogs') {
+        const next = [newItem, ...qualityLogs];
+        setQualityLogs(next);
+        localStorage.setItem('garmentops_demo_quality_logs', JSON.stringify(next));
       }
       return;
     }
@@ -910,6 +937,10 @@ export default function App() {
         const next = meetings.filter(m => m.id !== id);
         setMeetings(next);
         localStorage.setItem('garmentops_demo_meetings', JSON.stringify(next));
+      } else if (col === 'qualityLogs') {
+        const next = qualityLogs.filter(q => q.id !== id);
+        setQualityLogs(next);
+        localStorage.setItem('garmentops_demo_quality_logs', JSON.stringify(next));
       }
       return;
     }
@@ -953,6 +984,10 @@ export default function App() {
         const next = meetings.map(m => m.id === id ? { ...m, ...data } : m);
         setMeetings(next);
         localStorage.setItem('garmentops_demo_meetings', JSON.stringify(next));
+      } else if (col === 'qualityLogs') {
+        const next = qualityLogs.map(q => q.id === id ? { ...q, ...data } : q);
+        setQualityLogs(next);
+        localStorage.setItem('garmentops_demo_quality_logs', JSON.stringify(next));
       }
       return;
     }
@@ -993,6 +1028,7 @@ export default function App() {
   const [lineStatusFilter, setLineStatusFilter] = useState<"Tất cả" | "Rồi" | "Chưa">("Tất cả");
   const [lineStatusSearch, setLineStatusSearch] = useState("");
   const [calendarYearMonth, setCalendarYearMonth] = useState(format(new Date(), "yyyy-MM"));
+  const [dutyReportPeriod, setDutyReportPeriod] = useState<"day" | "week" | "month">("month");
 
   // Specialized Attendance Statistics states
   const [statsPeriod, setStatsPeriod] = useState<"day" | "week" | "month">("day");
@@ -2401,6 +2437,7 @@ export default function App() {
     { id: "planning", label: "Kế hoạch", icon: Calendar },
     { id: "timestudy", label: "Bấm Giờ", icon: Clock },
     { id: "duty", label: "Quản lý CN", icon: ClipboardList },
+    { id: "quality", label: "Chất lượng", icon: ShieldAlert },
     { id: "utilities", label: "Tiện ích", icon: CloudLightning },
   ];
 
@@ -6847,12 +6884,31 @@ export default function App() {
 
                     const daysOfWeek = ["T2", "T3", "T4", "T5", "T6", "T7", "CN"];
 
-                    const monthlyDuties = duties.filter(d => d.date && d.date.startsWith(calendarYearMonth));
+                    const activePeriodDuties = (() => {
+                      if (dutyReportPeriod === "day") {
+                        return duties.filter(d => d.date === dutyDate);
+                      } else if (dutyReportPeriod === "week") {
+                        const selectedDate = new Date(dutyDate);
+                        const day = selectedDate.getDay();
+                        const diff = selectedDate.getDate() - day + (day === 0 ? -6 : 1);
+                        const monday = new Date(selectedDate.setDate(diff));
+                        
+                        const weekDates: string[] = [];
+                        for (let i = 0; i < 7; i++) {
+                          const d = new Date(monday);
+                          d.setDate(monday.getDate() + i);
+                          weekDates.push(format(d, "yyyy-MM-dd"));
+                        }
+                        return duties.filter(d => d.date && weekDates.includes(d.date));
+                      } else {
+                        return duties.filter(d => d.date && d.date.startsWith(calendarYearMonth));
+                      }
+                    })();
 
                     const workerDutyCounts = workers.map(worker => {
                       let sweepCount = 0;
                       let trashCount = 0;
-                      monthlyDuties.forEach(d => {
+                      activePeriodDuties.forEach(d => {
                         if (d.sweeperIds?.includes(worker.id)) sweepCount++;
                         if (d.trashCollectorIds?.includes(worker.id)) trashCount++;
                       });
@@ -6867,6 +6923,12 @@ export default function App() {
 
                     const workersWithDuty = workerDutyCounts.filter(w => w.totalCount > 0).sort((a, b) => b.totalCount - a.totalCount);
                     const workersWithoutDuty = workerDutyCounts.filter(w => w.totalCount === 0).sort((a, b) => a.line.localeCompare(b.line, undefined, { numeric: true }));
+
+                    const periodLabel = {
+                      day: "ngày",
+                      week: "tuần",
+                      month: "tháng"
+                    }[dutyReportPeriod];
 
                     return (
                       <div className="space-y-6">
@@ -7015,12 +7077,59 @@ export default function App() {
 
                           {/* Overview Stats lists */}
                           <div className="lg:col-span-2 space-y-6">
+                            {/* Toggle Period for Statistics */}
+                            <div className="bg-gradient-to-r from-indigo-50 to-indigo-100/50 p-4 rounded-3xl border border-indigo-100 flex flex-col gap-2 shadow-sm">
+                              <span className="text-[10px] font-black uppercase tracking-wider text-indigo-700">
+                                📊 Phạm vi thống kê trực nhật
+                              </span>
+                              <div className="grid grid-cols-3 gap-1 bg-white p-1 rounded-2xl border border-indigo-100/50">
+                                <button
+                                  type="button"
+                                  onClick={() => setDutyReportPeriod("day")}
+                                  className={`py-1.5 px-2 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                                    dutyReportPeriod === "day"
+                                      ? "bg-indigo-600 text-white shadow-md"
+                                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  Hôm nay
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDutyReportPeriod("week")}
+                                  className={`py-1.5 px-2 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                                    dutyReportPeriod === "week"
+                                      ? "bg-indigo-600 text-white shadow-md"
+                                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  Tuần này
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setDutyReportPeriod("month")}
+                                  className={`py-1.5 px-2 rounded-xl text-[11px] font-black transition-all cursor-pointer ${
+                                    dutyReportPeriod === "month"
+                                      ? "bg-indigo-600 text-white shadow-md"
+                                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-50"
+                                  }`}
+                                >
+                                  Tháng này
+                                </button>
+                              </div>
+                              <p className="text-[10px] text-indigo-900/60 font-medium italic">
+                                {dutyReportPeriod === "day" && `Đang xem ngày ${safeFormatDate(dutyDate, "dd/MM/yyyy")}`}
+                                {dutyReportPeriod === "week" && `Đang xem tuần chứa ngày ${safeFormatDate(dutyDate, "dd/MM/yyyy")}`}
+                                {dutyReportPeriod === "month" && `Đang xem tháng ${mStr}/${yStr}`}
+                              </p>
+                            </div>
+
                             {/* Haven't done duty */}
                             <div className="bg-white p-5 rounded-3xl border border-gray-100 shadow-sm flex flex-col justify-between min-h-[220px]">
                               <div>
                                 <div className="flex justify-between items-center border-b border-gray-50 pb-3 mb-3">
                                   <h5 className="text-xs font-black uppercase tracking-wider text-amber-800 flex items-center gap-1.5">
-                                    ⚠️ Chưa trực nhật tháng này ({workersWithoutDuty.length})
+                                    ⚠️ Chưa trực nhật {periodLabel} này ({workersWithoutDuty.length})
                                   </h5>
                                   <span className="text-[10px] text-gray-400 font-bold">
                                     Ưu tiên phân công
@@ -7046,7 +7155,7 @@ export default function App() {
                                   ))}
                                   {workersWithoutDuty.length === 0 && (
                                     <div className="text-center py-6 text-xs text-gray-400 italic">
-                                      Tất cả công nhân đã được trực nhật tháng này! 👏
+                                      Tất cả công nhân đã được trực nhật {periodLabel} này! 👏
                                     </div>
                                   )}
                                 </div>
@@ -7058,7 +7167,7 @@ export default function App() {
                               <div>
                                 <div className="flex justify-between items-center border-b border-gray-50 pb-3 mb-3">
                                   <h5 className="text-xs font-black uppercase tracking-wider text-emerald-800 flex items-center gap-1.5">
-                                    🟢 Đã trực nhật tháng này ({workersWithDuty.length})
+                                    🟢 Đã trực nhật {periodLabel} này ({workersWithDuty.length})
                                   </h5>
                                   <span className="text-[10px] text-gray-400 font-bold">
                                     Số lần trực nhật
@@ -7092,7 +7201,7 @@ export default function App() {
                                   ))}
                                   {workersWithDuty.length === 0 && (
                                     <div className="text-center py-6 text-xs text-gray-400 italic">
-                                      Chưa có ai trực nhật trong tháng này.
+                                      Chưa có ai trực nhật trong {periodLabel} này.
                                     </div>
                                   )}
                                 </div>
@@ -8142,6 +8251,25 @@ export default function App() {
                   lines={lines}
                   onImportWorkers={handleImportWorkers}
                   onImportOperations={handleImportOperations}
+                />
+              </motion.div>
+            )}
+
+            {activeTab === "quality" && (
+              <motion.div
+                key="quality"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -10 }}
+              >
+                <QualityTab
+                  workers={workers}
+                  operations={operations}
+                  qualityLogs={qualityLogs}
+                  lines={lines}
+                  onAddLog={addDocToFirestore}
+                  onUpdateLog={updateDocInFirestore}
+                  onDeleteLog={deleteDocFromFirestore}
                 />
               </motion.div>
             )}

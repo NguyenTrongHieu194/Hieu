@@ -66,3 +66,16 @@ export interface PlanFeedItem {
   createdAt: string; // ISO date string or formatted date
 }
 
+export interface QualityLog {
+  id: string;
+  date: string; // "yyyy-MM-dd"
+  workerId: string;
+  operationId: string;
+  line: string;
+  totalChecked: number; // Total pieces checked
+  defectCount: number; // Defective pieces
+  defectType: string; // e.g. "Bỏ mũi", "Lệch đường may", etc.
+  severity: 'mild' | 'moderate' | 'critical'; // Mild, Moderate, Critical
+  notes?: string;
+}
+
