@@ -34,6 +34,7 @@
         "skills": { "type": "array", "items": { "type": "string" } },
         "line": { "type": "string" },
         "performance": { "type": "number" },
+        "gender": { "type": "string", "enum": ["nam", "nữ"] },
         "userId": { "type": "string" }
       },
       "required": ["name", "code", "userId"]
@@ -127,6 +128,67 @@
         "updatedAt": { "type": "string", "format": "date-time" }
       },
       "required": ["accessToken"]
+    },
+    "AttendanceRecord": {
+      "title": "Attendance Record",
+      "description": "Daily worker attendance log",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "workerId": { "type": "string" },
+        "status": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["date", "workerId", "status", "userId"]
+    },
+    "DutyRecord": {
+      "title": "Duty Record",
+      "description": "Daily cleaning and waste disposal assignment",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "sweeperIds": { "type": "array", "items": { "type": "string" } },
+        "trashCollectorIds": { "type": "array", "items": { "type": "string" } },
+        "userId": { "type": "string" }
+      },
+      "required": ["date", "userId"]
+    },
+    "WorkerHourlyLog": {
+      "title": "Worker Hourly Log",
+      "description": "Hourly or daily production log per worker",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "line": { "type": "string" },
+        "workerId": { "type": "string" },
+        "workerName": { "type": "string" },
+        "workerCode": { "type": "string" },
+        "opId": { "type": "string" },
+        "opCode": { "type": "string" },
+        "opName": { "type": "string" },
+        "style": { "type": "string" },
+        "logType": { "type": "string", "enum": ["daily", "hourly"] },
+        "hourRange": { "type": "string" },
+        "actualQuantity": { "type": "number" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "workerId", "opId", "actualQuantity", "userId"]
+    },
+    "Meeting": {
+      "title": "Meeting",
+      "description": "Meeting notes for workers or company",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string" },
+        "type": { "type": "string", "enum": ["worker", "company"] },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "userId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["date", "type", "content", "userId"]
     }
   },
   "firestore": {
@@ -165,6 +227,22 @@
     "users/{userId}/plans": {
       "schema": "PlanFeedItem",
       "description": "User's uploaded production plans and visual charts"
+    },
+    "users/{userId}/attendance": {
+      "schema": "AttendanceRecord",
+      "description": "User's worker attendance database"
+    },
+    "users/{userId}/duties": {
+      "schema": "DutyRecord",
+      "description": "User's daily cleaning and duty scheduling database"
+    },
+    "users/{userId}/workerHourlyLogs": {
+      "schema": "WorkerHourlyLog",
+      "description": "User's worker hourly production logs"
+    },
+    "users/{userId}/meetings": {
+      "schema": "Meeting",
+      "description": "User's worker or company meeting notes database"
     }
   }
 }

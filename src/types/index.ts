@@ -5,6 +5,7 @@ export interface Worker {
   skills: string[]; // e.g., ["Tra khóa", "Sườn", "Gấu"]
   line: string;
   performance: number; // Percentage
+  gender?: 'nam' | 'nữ';
 }
 
 export interface Operation {

@@ -11,10 +11,33 @@ const PORT = 3000;
 
 app.use(express.json({ limit: "50mb" }));
 
+let lastApiKey: string | null = null;
 let aiClient: GoogleGenAI | null = null;
 
+function formatAIError(error: any): string {
+  const errMsg = String(error?.message || error || "");
+  const errStr = JSON.stringify(error) || errMsg;
+
+  if (errStr.includes("API key not valid") || errStr.includes("API_KEY_INVALID") || errMsg.includes("API key not valid") || errMsg.includes("API_KEY_INVALID")) {
+    return "Khóa API Gemini (GEMINI_API_KEY) của bạn không hợp lệ hoặc chưa chính xác. Vui lòng truy cập Settings (Cấu hình) > Secrets (Bí mật) trên AI Studio, hoặc Environment Variables trên Vercel, tạo một khóa API mới và cập nhật lại.";
+  }
+
+  if (errStr.includes("RESOURCE_EXHAUSTED") || errStr.includes("quota") || errStr.includes("limit") || errMsg.includes("quota") || errMsg.includes("limit")) {
+    return "Hạn mức (Quota) cuộc gọi API Gemini của bạn hiện tại đã hết hoặc bị giới hạn. Vui lòng nâng cấp tài khoản hoặc thử lại sau ít phút hoặc ngày mai.";
+  }
+
+  if (errStr.includes("UNAVAILABLE") || errStr.includes("503") || errStr.includes("overload") || errMsg.includes("overload")) {
+    return "Dịch vụ AI hiện đang quá tải hoặc tạm thời không khả dụng. Vui lòng thử lại sau vài giây.";
+  }
+
+  return errMsg || "Lỗi không xác định khi kết nối với AI.";
+}
+
 function getGoogleGenAI(): GoogleGenAI {
-  const apiKey = process.env.GEMINI_API_KEY;
+  let apiKey = process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    apiKey = apiKey.trim();
+  }
   console.log("=== DIAGNOSTIC GEMINI_API_KEY ===");
   console.log("Key exists:", !!apiKey);
   console.log("Key length:", apiKey ? apiKey.length : 0);
@@ -22,15 +45,20 @@ function getGoogleGenAI(): GoogleGenAI {
   console.log("=================================");
 
   if (!apiKey) {
-    throw new Error("Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ Vercel. LƯU Ý: Vercel yêu cầu bạn phải tạo một bản DEPLOY mới hoặc nhấn REDEPLOY để các biến môi trường mới cấu hình có hiệu lực!");
+    throw new Error("Chưa cấu hình GEMINI_API_KEY trên môi trường máy chủ. Vui lòng cập nhật trong Settings > Secrets trên AI Studio hoặc Project Settings trên Vercel.");
   }
   
   // Validate key pattern so we throw a clean human-readable error instead of "The string did not match the expected pattern"
-  if (!apiKey.startsWith("AIzaSy") || apiKey.length < 20) {
-    throw new Error(`Khóa GEMINI_API_KEY không đúng định dạng (khóa của bạn bắt đầu bằng '${apiKey.substring(0, 6) || ""}' nhưng khóa Gemini hợp lệ phải bắt đầu bằng 'AIzaSy'). Vui lòng cấu hình lại và nhớ REDEPLOY trên Vercel.`);
+  if (apiKey.startsWith("AQ.Ab8")) {
+    throw new Error(`Khóa GEMINI_API_KEY không đúng định dạng (khóa của bạn bắt đầu bằng 'AQ.Ab8' nhưng khóa Gemini hợp lệ phải bắt đầu bằng 'AIzaSy'). Vui lòng cấu hình lại trong mục Settings -> Secrets.`);
   }
 
-  if (!aiClient) {
+  if (apiKey.length < 10) {
+    throw new Error(`Khóa GEMINI_API_KEY không đúng định dạng hoặc quá ngắn. Vui lòng cấu hình lại.`);
+  }
+
+  if (!aiClient || lastApiKey !== apiKey) {
+    lastApiKey = apiKey;
     aiClient = new GoogleGenAI({
       apiKey: apiKey,
       httpOptions: {
@@ -211,22 +239,8 @@ async function generateContentWithRetry(params: {
       }
     } catch (error: any) {
       console.error("AI Extraction Error:", error);
-      
-      const errorMessage = error.message || "";
-      
-      if (errorMessage.includes("429") || errorMessage.includes("quota")) {
-        return res.status(429).json({ 
-          error: "Hệ thống AI đang tạm thời quá tải hoặc hết hạn mức miễn phí (Quota exceeded). Vui lòng thử lại sau ít phút hoặc ngày mai." 
-        });
-      }
-
-      if (errorMessage.includes("expected pattern")) {
-        return res.status(400).json({
-          error: "Định dạng hình ảnh không hợp lệ hoặc quá lớn. Vui lòng thử nén ảnh hoặc chụp lại."
-        });
-      }
-      
-      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + (error.message || "Unknown error") });
+      const friendlyMessage = formatAIError(error);
+      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + friendlyMessage });
     }
   });
 
@@ -316,22 +330,8 @@ async function generateContentWithRetry(params: {
       }
     } catch (error: any) {
       console.error("AI Worker Extraction Error:", error);
-      
-      const errorMessage = error.message || "";
-
-      if (errorMessage.includes("429") || errorMessage.includes("quota")) {
-        return res.status(429).json({ 
-          error: "Hệ thống AI đang tạm thời quá tải. Vui lòng thử lại sau ít phút hoặc ngày mai." 
-        });
-      }
-
-      if (errorMessage.includes("expected pattern")) {
-        return res.status(400).json({
-          error: "Định dạng hình ảnh không hợp lệ hoặc quá lớn. Vui lòng thử nén ảnh hoặc chụp lại."
-        });
-      }
-      
-      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + (error.message || "Unknown error") });
+      const friendlyMessage = formatAIError(error);
+      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + friendlyMessage });
     }
   });
 
@@ -435,22 +435,8 @@ async function generateContentWithRetry(params: {
       }
     } catch (error: any) {
       console.error("AI Efficiency Board Extraction Error:", error);
-      
-      const errorMessage = error.message || "";
-
-      if (errorMessage.includes("429") || errorMessage.includes("quota")) {
-        return res.status(429).json({ 
-          error: "Hệ thống AI đang tạm thời quá tải. Vui lòng thử lại sau ít phút hoặc ngày mai." 
-        });
-      }
-
-      if (errorMessage.includes("expected pattern")) {
-        return res.status(400).json({
-          error: "Định dạng hình ảnh không hợp lệ hoặc quá lớn. Vui lòng thử nén ảnh hoặc chụp lại."
-        });
-      }
-      
-      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + (error.message || "Unknown error") });
+      const friendlyMessage = formatAIError(error);
+      res.status(500).json({ error: "Có lỗi xảy ra khi xử lý bằng AI: " + friendlyMessage });
     }
   });
 
@@ -599,7 +585,8 @@ Hãy giữ vững tinh thần giúp việc hiệu quả, chuyên nghiệp, luôn
       res.json({ text: responseText });
     } catch (err: any) {
       console.error("AI Chat API Error:", err);
-      res.status(500).json({ error: "Có lỗi xảy ra khi trò chuyện với AI: " + (err.message || "Unknown error") });
+      const friendlyMessage = formatAIError(err);
+      res.status(500).json({ error: "Có lỗi xảy ra khi trò chuyện với AI: " + friendlyMessage });
     }
   });
 

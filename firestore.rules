@@ -96,6 +96,25 @@ service cloud.firestore {
              data.title is string && data.title.size() > 0 && data.title.size() <= 300;
     }
 
+    function isValidWorkerHourlyLog(data, userId) {
+      return data.keys().hasAll(['date', 'workerId', 'opId', 'actualQuantity', 'userId']) &&
+             data.keys().size() <= 16 &&
+             data.userId == userId &&
+             data.date is string &&
+             data.workerId is string &&
+             data.opId is string &&
+             data.actualQuantity is number;
+    }
+
+    function isValidMeeting(data, userId) {
+      return data.keys().hasAll(['date', 'type', 'content', 'userId']) &&
+             data.keys().size() <= 12 &&
+             data.userId == userId &&
+             data.date is string &&
+             data.type is string && (data.type == 'worker' || data.type == 'company') &&
+             data.content is string && data.content.size() <= 10000;
+    }
+
     // --- Collection Matches ---
 
     match /users/{userId} {
@@ -155,6 +174,32 @@ service cloud.firestore {
         allow read: if isOwner(userId);
         allow create: if isOwner(userId) && isValidId(planId) && isValidPlanRecord(incoming(), userId);
         allow update: if isOwner(userId) && isValidPlanRecord(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /attendance/{attendanceId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /duties/{dutyId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /lineDuties/{lineDutyId} {
+        allow read, write: if isOwner(userId);
+      }
+
+      match /workerHourlyLogs/{logId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(logId) && isValidWorkerHourlyLog(incoming(), userId);
+        allow update: if isOwner(userId) && isValidWorkerHourlyLog(incoming(), userId);
+        allow delete: if isOwner(userId);
+      }
+
+      match /meetings/{meetingId} {
+        allow read: if isOwner(userId);
+        allow create: if isOwner(userId) && isValidId(meetingId) && isValidMeeting(incoming(), userId);
+        allow update: if isOwner(userId) && isValidMeeting(incoming(), userId);
         allow delete: if isOwner(userId);
       }
     }
